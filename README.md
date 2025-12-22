@@ -169,14 +169,14 @@ module "iam" {
       username            = "admin"
       tags                = ["admin"]
       send_welcome_email  = true
-      send_password_email = true
+      send_password_email = false  # Set to true only if password field is set
     }
     developer = {
       email               = "dev@example.com"
       username            = "developer"
       tags                = ["developer"]
       send_welcome_email  = true
-      send_password_email = true
+      send_password_email = false
     }
   }
 
@@ -281,6 +281,16 @@ See [Scaleway IAM Documentation](https://www.scaleway.com/en/docs/identity-and-a
 2. **Disable Unused**: Set `disabled = true` for emergency/backup keys
 3. **Remove Promptly**: Delete keys when no longer needed
 
+> **⚠️ Important**: Scaleway API does not support creating SSH keys with `disabled = true` directly. Use a two-step process:
+> 1. First apply with `disabled = false` (creates the key)
+> 2. Second apply with `disabled = true` (disables the key)
+
+### User Management
+
+1. **Email Invitations**: Creating users sends invitation emails automatically
+2. **Password Email**: Setting `send_password_email = true` requires the user to have a password set (use SSO/OAuth instead)
+3. **Welcome Email**: `send_welcome_email = true` sends onboarding instructions
+
 ## Examples
 
 - [Minimal](./examples/minimal/) - Basic application with API key
@@ -353,7 +363,7 @@ No modules.
 | <a name="output_policies"></a> [policies](#output\_policies) | Map of all created IAM policies.<br/><br/>Each entry contains:<br/>- id: The policy's unique identifier<br/>- name: The policy's display name<br/>- description: The policy's description<br/>- created\_at: Creation timestamp<br/>- updated\_at: Last update timestamp<br/>- editable: Whether the policy can be modified |
 | <a name="output_policy_ids"></a> [policy\_ids](#output\_policy\_ids) | Map of policy keys to their IDs for easy lookup. |
 | <a name="output_project_id"></a> [project\_id](#output\_project\_id) | The ID of the Scaleway project (if project\_name was provided). |
-| <a name="output_security_audit"></a> [security\_audit](#output\_security\_audit) | Security-relevant information for auditing.<br/><br/>Includes:<br/>- API keys without expiration (security risk)<br/>- Users without 2FA enabled<br/>- Disabled SSH keys count |
+| <a name="output_security_audit"></a> [security\_audit](#output\_security\_audit) | Security-relevant information for auditing.<br/><br/>Includes:<br/>- API keys without expiration (security risk)<br/>- API keys with expiration set<br/>- Disabled SSH keys<br/>- Active SSH keys |
 | <a name="output_ssh_key_fingerprints"></a> [ssh\_key\_fingerprints](#output\_ssh\_key\_fingerprints) | Map of SSH key names to their fingerprints. |
 | <a name="output_ssh_key_ids"></a> [ssh\_key\_ids](#output\_ssh\_key\_ids) | Map of SSH key names to their IDs for easy lookup. |
 | <a name="output_ssh_key_public_keys"></a> [ssh\_key\_public\_keys](#output\_ssh\_key\_public\_keys) | Map of SSH key names to their public keys. |
@@ -361,16 +371,41 @@ No modules.
 | <a name="output_summary"></a> [summary](#output\_summary) | Summary statistics for all IAM resources created by this module.<br/><br/>Useful for monitoring and auditing purposes. |
 | <a name="output_user_details"></a> [user\_details](#output\_user\_details) | Full user details including PII (SENSITIVE).<br/><br/>Contains email addresses - handle according to privacy regulations. |
 | <a name="output_user_ids"></a> [user\_ids](#output\_user\_ids) | Map of user keys to their IDs for easy lookup. |
-| <a name="output_users"></a> [users](#output\_users) | Map of all created IAM users (SENSITIVE - contains PII).<br/><br/>Each entry contains:<br/>- id: The user's unique identifier<br/>- created\_at: Creation timestamp<br/>- updated\_at: Last update timestamp<br/>- status: The user's account status<br/>- type: The user's type (owner, guest, etc.)<br/>- two\_factor\_enabled: Whether 2FA is enabled<br/><br/>Note: Email addresses are excluded from non-sensitive outputs.<br/>Use user\_details output if you need email addresses. |
+| <a name="output_users"></a> [users](#output\_users) | Map of all created IAM users (SENSITIVE - contains PII).<br/><br/>Each entry contains:<br/>- id: The user's unique identifier<br/>- created\_at: Creation timestamp<br/>- updated\_at: Last update timestamp<br/>- status: The user's account status<br/>- type: The user's type (owner, guest, etc.)<br/><br/>Note: Email addresses are excluded from non-sensitive outputs.<br/>Use user\_details output if you need email addresses. |
 <!-- END_TF_DOCS -->
 
 ## Contributing
 
+### Prerequisites
+
+This module uses [mise](https://mise.jdx.dev/) for tool management. Install the required tools:
+
+```bash
+# Install mise (if not already installed)
+curl https://mise.run | sh
+
+# Install required tools
+mise install
+
+# Install pre-commit hooks
+pre-commit install --install-hooks
+```
+
+### Development Workflow
+
 1. Fork the repository
 2. Create a feature branch
-3. Make your changes with tests
-4. Run `terraform fmt` and `terraform validate`
-5. Submit a merge request
+3. Make your changes
+4. Run validation:
+   ```bash
+   tofu fmt -recursive
+   tofu validate
+   ```
+5. Pre-commit hooks will automatically run on commit:
+   - `tofu fmt` - Format Terraform/OpenTofu files
+   - `terraform-docs` - Update README.md documentation
+   - `git-cliff` - Update CHANGELOG.md
+6. Submit a merge request
 
 ## License
 
