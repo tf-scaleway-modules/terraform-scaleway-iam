@@ -57,9 +57,8 @@ module "iam" {
   # ---------------------------------------------------------------------------
   # Production security settings
 
-  enable_deletion_protection  = true  # Prevent accidental deletion
-  require_api_key_expiration  = false # Set to true in production
-  api_key_max_expiration_days = 365   # Max 1 year validity
+  enable_deletion_protection = false # Prevent accidental deletion
+  require_api_key_expiration = false # Set to true in production
 
   # ---------------------------------------------------------------------------
   # Applications (Service Accounts)
@@ -230,23 +229,23 @@ module "iam" {
   # ---------------------------------------------------------------------------
   # Note: Creating users sends invitation emails
 
-  # users = {
-  #   admin = {
-  #     email               = "admin@example.com"
-  #     username            = "admin"
-  #     tags                = ["admin"]
-  #     send_welcome_email  = true
-  #     send_password_email = true
-  #   }
-  #
-  #   developer = {
-  #     email               = "developer@example.com"
-  #     username            = "developer"
-  #     tags                = ["developer"]
-  #     send_welcome_email  = true
-  #     send_password_email = true
-  #   }
-  # }
+  users = {
+    admin = {
+      email               = "medhioub.h@gmail.com"
+      username            = "admin"
+      tags                = ["admin"]
+      send_welcome_email  = true
+      send_password_email = false # Requires password field if true
+    }
+
+    # developer = {
+    #   email               = "developer@example.com"
+    #   username            = "developer"
+    #   tags                = ["developer"]
+    #   send_welcome_email  = true
+    #   send_password_email = true
+    # }
+  }
 
   # ---------------------------------------------------------------------------
   # SSH Keys
@@ -273,7 +272,7 @@ module "iam" {
       # To disable this key after creation:
       # 1. Apply with disabled = false (creates the key)
       # 2. Change to disabled = true and apply again (disables the key)
-      disabled = true # Key is now disabled (only works after initial creation)
+      disabled = false
     }
   }
 }

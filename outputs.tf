@@ -191,19 +191,17 @@ output "users" {
     - updated_at: Last update timestamp
     - status: The user's account status
     - type: The user's type (owner, guest, etc.)
-    - two_factor_enabled: Whether 2FA is enabled
 
     Note: Email addresses are excluded from non-sensitive outputs.
     Use user_details output if you need email addresses.
   EOT
   value = {
     for k, v in scaleway_iam_user.this : k => {
-      id                 = v.id
-      created_at         = v.created_at
-      updated_at         = v.updated_at
-      status             = v.status
-      type               = v.type
-      two_factor_enabled = v.two_factor_enabled
+      id         = v.id
+      created_at = v.created_at
+      updated_at = v.updated_at
+      status     = v.status
+      type       = v.type
     }
   }
 }
@@ -221,16 +219,15 @@ output "user_details" {
   EOT
   value = {
     for k, v in scaleway_iam_user.this : k => {
-      id                 = v.id
-      email              = v.email
-      username           = v.username
-      created_at         = v.created_at
-      updated_at         = v.updated_at
-      deletable          = v.deletable
-      last_login_at      = v.last_login_at
-      status             = v.status
-      type               = v.type
-      two_factor_enabled = v.two_factor_enabled
+      id            = v.id
+      email         = v.email
+      username      = v.username
+      created_at    = v.created_at
+      updated_at    = v.updated_at
+      deletable     = v.deletable
+      last_login_at = v.last_login_at
+      status        = v.status
+      type          = v.type
     }
   }
   sensitive = true
@@ -349,8 +346,9 @@ output "security_audit" {
 
     Includes:
     - API keys without expiration (security risk)
-    - Users without 2FA enabled
-    - Disabled SSH keys count
+    - API keys with expiration set
+    - Disabled SSH keys
+    - Active SSH keys
   EOT
   value = {
     api_keys_without_expiration = [
