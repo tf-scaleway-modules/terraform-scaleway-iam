@@ -9,12 +9,14 @@
 # Project Data Source
 # ------------------------------------------------------------------------------
 # Looks up the Scaleway project by name to get the project ID.
-# All resources in this module are created within this project.
+# This is only used when project_name is provided.
 #
-# The project must already exist in the specified organization.
+# SSH keys and some other resources are project-scoped.
 # ==============================================================================
 
 data "scaleway_account_project" "project" {
+  count = var.project_name != null ? 1 : 0
+
   name            = var.project_name
   organization_id = var.organization_id
 }
