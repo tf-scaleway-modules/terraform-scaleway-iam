@@ -308,7 +308,7 @@ See [Scaleway IAM Documentation](https://www.scaleway.com/en/docs/identity-and-a
 
 | Name | Version |
 |------|---------|
-| <a name="provider_scaleway"></a> [scaleway](#provider\_scaleway) | 2.65.1 |
+| <a name="provider_scaleway"></a> [scaleway](#provider\_scaleway) | ~> 2.64 |
 | <a name="provider_terraform"></a> [terraform](#provider\_terraform) | n/a |
 
 ## Modules
