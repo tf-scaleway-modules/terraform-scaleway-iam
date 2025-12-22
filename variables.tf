@@ -64,11 +64,13 @@ variable "tags" {
 
     Tags are key-value pairs for organizing and categorizing resources.
     Common uses:
-    - Environment identification (environment:production)
-    - Cost allocation (team:platform, project:website)
-    - Automation (managed-by:terraform)
+    - Environment identification (environment=production)
+    - Cost allocation (team=platform, project=website)
+    - Automation (managed-by=terraform)
 
-    Format: List of strings (e.g., ["env:prod", "team:devops"])
+    Format: List of strings (e.g., ["env=prod", "team=devops"])
+
+    NOTE: Scaleway tags cannot contain colons (:). Use = or _ instead.
   EOT
   type        = list(string)
   default     = []
@@ -110,24 +112,6 @@ variable "require_api_key_expiration" {
   default     = false
 }
 
-variable "api_key_max_expiration_days" {
-  description = <<-EOT
-    Maximum number of days an API key can be valid.
-
-    Set to 0 to disable this check.
-
-    Recommended values:
-    - 90 days for production
-    - 365 days for long-running automation
-  EOT
-  type        = number
-  default     = 0
-
-  validation {
-    condition     = var.api_key_max_expiration_days >= 0
-    error_message = "api_key_max_expiration_days must be >= 0."
-  }
-}
 
 # ==============================================================================
 # IAM Applications
@@ -557,6 +541,15 @@ variable "ssh_keys" {
     - Protect private keys with passphrases
     - Rotate keys regularly
     - Remove unused keys promptly
+
+    IMPORTANT - DISABLED SSH KEYS:
+    Scaleway API does not support creating an SSH key with disabled = true.
+    The key must first be created with disabled = false, then on a subsequent
+    apply you can change it to disabled = true.
+
+    Two-step process for disabled keys:
+    1. First apply:  disabled = false (key is created)
+    2. Second apply: disabled = true  (key is disabled)
   EOT
   type = map(object({
     name       = string

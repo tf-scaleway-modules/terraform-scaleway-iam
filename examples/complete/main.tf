@@ -24,9 +24,14 @@ variable "project_name" {
   type        = string
 }
 
-variable "project_id" {
-  description = "Your Scaleway Project ID (for policy rules)"
-  type        = string
+# ==============================================================================
+# Data Sources
+# ==============================================================================
+# Look up the project to get the project_id for policy rules
+
+data "scaleway_account_project" "this" {
+  name            = var.project_name
+  organization_id = var.organization_id
 }
 
 # ==============================================================================
@@ -40,10 +45,11 @@ module "iam" {
   project_name    = var.project_name
 
   # Global tags applied to all resources
+  # Note: Scaleway tags cannot contain colons, use = or _ instead
   tags = [
-    "environment:production",
-    "managed-by:terraform",
-    "example:complete"
+    "environment=production",
+    "managed-by=terraform",
+    "example=complete"
   ]
 
   # ---------------------------------------------------------------------------
@@ -70,7 +76,7 @@ module "iam" {
     gitlab_ci = {
       name        = "gitlab-ci-pipeline"
       description = "GitLab CI/CD deployment pipeline"
-      tags        = ["ci-cd", "gitlab"]
+      tags        = ["cicd", "gitlab"]
     }
 
     monitoring = {
@@ -95,21 +101,21 @@ module "iam" {
     terraform_key = {
       application_key    = "terraform"
       description        = "Terraform automation API key"
-      default_project_id = var.project_id
+      default_project_id = data.scaleway_account_project.this.id
       # No expiration for long-running automation
     }
 
     gitlab_ci_key = {
       application_key    = "gitlab_ci"
       description        = "GitLab CI deployment key"
-      default_project_id = var.project_id
+      default_project_id = data.scaleway_account_project.this.id
       expires_at         = "2026-12-31T23:59:59Z"
     }
 
     monitoring_key = {
       application_key    = "monitoring"
       description        = "Monitoring service read-only key"
-      default_project_id = var.project_id
+      default_project_id = data.scaleway_account_project.this.id
       expires_at         = "2026-06-30T23:59:59Z"
     }
 
@@ -185,9 +191,9 @@ module "iam" {
             "InstancesFullAccess",
             "ContainersFullAccess",
             "ObjectStorageFullAccess",
-            "DatabasesFullAccess"
+            "RelationalDatabasesFullAccess"
           ]
-          project_ids = [var.project_id]
+          project_ids = [data.scaleway_account_project.this.id]
         }
       ]
     }
@@ -213,7 +219,7 @@ module "iam" {
       rules = [
         {
           permission_set_names = ["ObjectStorageFullAccess"]
-          project_ids          = [var.project_id]
+          project_ids          = [data.scaleway_account_project.this.id]
         }
       ]
     }
@@ -250,20 +256,24 @@ module "iam" {
   ssh_keys = {
     admin_key = {
       name       = "admin-workstation"
-      public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleKeyReplaceMeWithRealKey admin@example.com"
+      public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGk2xmMQnPM0XPxrwJGhLhmEHJnLlHjWwBkXxoYkMvy5 admin@example.com"
       disabled   = false
     }
 
     ci_deploy_key = {
       name       = "gitlab-ci-deploy"
-      public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleKeyReplaceMeWithRealKey gitlab-ci@example.com"
+      public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHUzjJHLXtGqIWPQGMvaRWYYWDMRVGNZLJzgNc4VO1Yf gitlab-ci@example.com"
       disabled   = false
     }
 
     emergency_access = {
       name       = "emergency-access"
-      public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleKeyReplaceMeWithRealKey emergency@example.com"
-      disabled   = true # Disabled by default, enable only when needed
+      public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPkBEDKDj8qjGPnGbyuLpH8MsP6dtu0sftGmSYJLFkdR emergency@example.com"
+      # IMPORTANT: Scaleway API requires SSH keys to be created with disabled=false first.
+      # To disable this key after creation:
+      # 1. Apply with disabled = false (creates the key)
+      # 2. Change to disabled = true and apply again (disables the key)
+      disabled = true # Key is now disabled (only works after initial creation)
     }
   }
 }

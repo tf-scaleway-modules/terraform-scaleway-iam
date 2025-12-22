@@ -116,6 +116,15 @@ resource "scaleway_iam_group" "this" {
 
   lifecycle {
     prevent_destroy = false # Controlled via terraform_data below
+
+    # IMPORTANT: Ignore changes to membership attributes because we manage
+    # memberships via the separate scaleway_iam_group_membership resource.
+    # Without this, the group resource would try to remove memberships on
+    # each apply, causing an infinite create/delete cycle.
+    ignore_changes = [
+      application_ids,
+      user_ids,
+    ]
   }
 
   depends_on = [
@@ -195,16 +204,33 @@ resource "scaleway_iam_policy" "this" {
   description     = each.value.description
   organization_id = var.organization_id
   tags            = distinct(concat(var.tags, each.value.tags))
-  no_principal    = each.value.no_principal
 
-  # Attach to users (use first user, additional users need separate policies or groups)
-  user_id = length(each.value.user_ids) > 0 ? each.value.user_ids[0] : null
+  # Only one of these can be set - they are mutually exclusive
+  # Priority: no_principal > user_id > group_id > application_id
+  no_principal = each.value.no_principal ? true : null
 
-  # Attach to groups (use first group, additional groups need separate policies)
-  group_id = length(each.value.group_keys) > 0 ? scaleway_iam_group.this[each.value.group_keys[0]].id : null
+  user_id = (
+    !each.value.no_principal && length(each.value.user_ids) > 0
+    ? each.value.user_ids[0]
+    : null
+  )
 
-  # Attach to applications (use first application, additional apps need separate policies)
-  application_id = length(each.value.application_keys) > 0 ? scaleway_iam_application.this[each.value.application_keys[0]].id : null
+  group_id = (
+    !each.value.no_principal &&
+    length(each.value.user_ids) == 0 &&
+    length(each.value.group_keys) > 0
+    ? scaleway_iam_group.this[each.value.group_keys[0]].id
+    : null
+  )
+
+  application_id = (
+    !each.value.no_principal &&
+    length(each.value.user_ids) == 0 &&
+    length(each.value.group_keys) == 0 &&
+    length(each.value.application_keys) > 0
+    ? scaleway_iam_application.this[each.value.application_keys[0]].id
+    : null
+  )
 
   # Define permission rules
   dynamic "rule" {
@@ -274,6 +300,15 @@ resource "scaleway_iam_user" "this" {
 # - Rotate keys regularly
 # - Remove unused keys promptly
 # - Set disabled = true for temporary access suspension
+#
+# IMPORTANT - DISABLED SSH KEYS:
+# The Scaleway API does not support creating SSH keys with disabled = true.
+# Keys must be created first (disabled = false), then disabled on a subsequent
+# apply (disabled = true). This is a Scaleway API limitation.
+#
+# Workflow for disabled keys:
+# 1. First apply:  Set disabled = false -> Key is created
+# 2. Second apply: Set disabled = true  -> Key is disabled
 # ==============================================================================
 
 resource "scaleway_iam_ssh_key" "this" {
