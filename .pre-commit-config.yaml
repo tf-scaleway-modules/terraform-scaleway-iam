@@ -48,10 +48,3 @@ repos:
       entry: bash -c '$HOME/.local/share/mise/shims/terraform-docs markdown table --output-file README.md --output-mode inject .'
       files: (\.tf|README\.md)$
       pass_filenames: false
-
-    - id: git-cliff
-      name: Generate CHANGELOG
-      language: system
-      entry: bash -c '$HOME/.local/share/mise/shims/git-cliff --config .cliff.toml --output CHANGELOG.md'
-      pass_filenames: false
-      always_run: true
