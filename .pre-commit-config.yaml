@@ -11,40 +11,38 @@ default_install_hook_types:
 
 repos:
 -   repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v6.0.0
+    rev: v6.0.0  # this is optional, use `pre-commit autoupdate` to get the latest rev!
     hooks:
+    # Verify YAML syntax
     -   id: check-yaml
         name: "Check YAML"
+        description: "Verify YAML syntax"
         args:
         - --allow-multiple-documents
     - id: check-json
     - id: detect-private-key
+    # Trims trailing whitespaces
     -   id: trailing-whitespace
         name: "Trailing Whitespaces"
+        description: "Trims trailing whitespaces"
+    # Protect Master from direct checkins
     -   id: no-commit-to-branch
         name: "No Commits to Master"
+        description: "Protect Master from direct checkins"
         args:
         - --branch=master
+    # Check for files that contain merge conflict strings.
     -   id: check-merge-conflict
         name: "MergeRequests conflicts"
+        description: "Check for files that contain merge conflict strings."
         args:
         - --assume-in-merge
     - id: end-of-file-fixer
       exclude: ^CHANGELOG\.md$
 
-# Terraform/OpenTofu hooks using mise shims (portable paths)
--   repo: local
+-   repo: https://github.com/antonbabenko/pre-commit-terraform.git
+    rev: v1.103.0
     hooks:
-    - id: tofu-fmt
-      name: OpenTofu Format
-      language: system
-      entry: bash -c '$HOME/.local/share/mise/shims/tofu fmt -recursive -diff'
-      files: \.tf$
-      pass_filenames: false
-
-    - id: terraform-docs
-      name: Terraform Docs
-      language: system
-      entry: bash -c '$HOME/.local/share/mise/shims/terraform-docs markdown table --output-file README.md --output-mode inject .'
-      files: (\.tf|README\.md)$
-      pass_filenames: false
+    - id: terraform_fmt
+    - id: terraform_docs
+    - id: terraform_tflint
