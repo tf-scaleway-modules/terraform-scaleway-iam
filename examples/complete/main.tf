@@ -231,7 +231,7 @@ module "iam" {
 
   users = {
     admin = {
-      email               = "medhioub.h@gmail.com"
+      email               = "admin@example.com"
       username            = "admin"
       tags                = ["admin"]
       send_welcome_email  = true
