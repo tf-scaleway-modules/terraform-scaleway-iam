@@ -302,13 +302,13 @@ See [Scaleway IAM Documentation](https://www.scaleway.com/en/docs/identity-and-a
 | Name | Version |
 |------|---------|
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.10.7 |
-| <a name="requirement_scaleway"></a> [scaleway](#requirement\_scaleway) | ~> 2.64 |
+| <a name="requirement_scaleway"></a> [scaleway](#requirement\_scaleway) | ~> 2.86 |
 
 ## Providers
 
 | Name | Version |
 |------|---------|
-| <a name="provider_scaleway"></a> [scaleway](#provider\_scaleway) | ~> 2.64 |
+| <a name="provider_scaleway"></a> [scaleway](#provider\_scaleway) | ~> 2.86 |
 | <a name="provider_terraform"></a> [terraform](#provider\_terraform) | n/a |
 
 ## Modules
@@ -423,7 +423,7 @@ This module is provided "as is" without warranty of any kind. Always test in non
 [apache-shield]: https://img.shields.io/badge/License-Apache%202.0-blue.svg
 [terraform-badge]: https://img.shields.io/badge/Terraform-%3E%3D1.10-623CE4
 [terraform-url]: https://www.terraform.io
-[scaleway-badge]: https://img.shields.io/badge/Scaleway%20Provider-%3E%3D2.64-4f0599
+[scaleway-badge]: https://img.shields.io/badge/Scaleway%20Provider-%3E%3D2.86-4f0599
 [scaleway-url]: https://registry.terraform.io/providers/scaleway/scaleway/
 [release-badge]: https://img.shields.io/gitlab/v/release/leminnov/terraform/modules/scaleway-iam?include_prereleases&sort=semver
 [release-url]: https://gitlab.com/leminnov/terraform/modules/scaleway-iam/-/releases
