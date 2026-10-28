@@ -36,7 +36,7 @@ The checkable form of each line is the `quality` store (`quality-simplicity`,
 - Group memberships are separate `scaleway_iam_group_membership` resources; the group
   ignores changes to `application_ids` and `user_ids`.
 - `enable_deletion_protection` defaults to `true`; `require_api_key_expiration` defaults to `false`.
-- `tests/` does not exist yet: the first behaviour change adds `tests/main.tftest.hcl`.
+- Unit tests live in `tests/main.tftest.hcl` (mock provider); the `check` block is in `main.tf`.
 
 ## Standards lookup
 Engineering standards are OpenSpec specs in the stores listed under `references:`
@@ -76,6 +76,6 @@ in your summary.
 
 ## Commands
 - Format / validate: `tofu fmt -recursive`, `tofu init -backend=false && tofu validate`, `tflint --recursive`
-- Tests: `tofu test` (unit, no Scaleway account; only once `tests/` exists)
+- Tests: `tofu test` (unit tests in `tests/main.tftest.hcl`, mock provider, no Scaleway account)
 - Everything incl. README regeneration: `pre-commit run -a`; changelog: `mise run changelog`
 - Specs: `mise run spec-validate`; standards stores: `mise run spec-setup`
