@@ -28,7 +28,7 @@ IAM applications and the API keys bound to an application or a user, with option
 - **THEN** the API key `u` is planned for that user and no application is referenced
 
 ### Requirement: API key owner and format validation
-Each API key MUST set exactly one of `application_key` and `user_id`. `user_id` and `default_project_id`, when set, MUST be lowercase UUIDs. `expires_at`, when set, MUST match `YYYY-MM-DDTHH:MM:SSZ`.
+Each API key MUST set exactly one of `application_key` and `user_id`. `application_key`, when set, MUST be a key of `applications`. `user_id` and `default_project_id`, when set, MUST be lowercase UUIDs. `expires_at`, when set, MUST match `YYYY-MM-DDTHH:MM:SSZ`.
 
 #### Scenario: Both owners
 - **WHEN** a key sets `application_key = "terraform"` and `user_id = "<uuid>"`
@@ -37,6 +37,10 @@ Each API key MUST set exactly one of `application_key` and `user_id`. `user_id` 
 #### Scenario: No owner
 - **WHEN** a key sets neither `application_key` nor `user_id`
 - **THEN** the plan fails with the same validation error
+
+#### Scenario: Unknown application
+- **WHEN** a key sets `application_key = "missing"` and `applications` has no `missing` key
+- **THEN** the plan fails with "application_key must be a key of the applications input."
 
 #### Scenario: Invalid user ID
 - **WHEN** `user_id = "not-a-uuid"`
@@ -51,7 +55,7 @@ Each API key MUST set exactly one of `application_key` and `user_id`. `user_id` 
 - **THEN** the plan fails with "expires_at must be in ISO 8601 format (YYYY-MM-DDTHH:MM:SSZ)."
 
 ### Requirement: Mandatory API key expiration
-When `require_api_key_expiration` is `true`, every API key SHALL set `expires_at`; a key without it MUST fail the plan through a `precondition` on the API key resource naming the key. When `false` (default), keys without `expires_at` SHALL be accepted.
+When `require_api_key_expiration` is `true`, every API key SHALL set `expires_at`; a key without it MUST fail the plan through a `precondition` on the API key resource naming the key, and the variable description SHALL say so. When `false` (default), keys without `expires_at` SHALL be accepted.
 
 #### Scenario: Expiration required and missing
 - **WHEN** `require_api_key_expiration = true` and key `ci` has no `expires_at`

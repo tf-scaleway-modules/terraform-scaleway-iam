@@ -24,7 +24,8 @@
 # Each application can have associated API keys and be assigned to groups
 # and policies for permission management.
 #
-# SECURITY: Lifecycle protection enabled by default to prevent accidental deletion.
+# SECURITY: A terraform_data guard (prevent_destroy) is created by default to
+# block accidental deletion. See var.enable_deletion_protection to lift it.
 # ==============================================================================
 
 resource "scaleway_iam_application" "this" {
@@ -34,13 +35,9 @@ resource "scaleway_iam_application" "this" {
   description     = each.value.description
   organization_id = var.organization_id
   tags            = distinct(concat(var.tags, each.value.tags))
-
-  lifecycle {
-    prevent_destroy = false # Controlled via precondition below
-  }
 }
 
-# Deletion protection check for applications
+# Deletion protection guard for applications
 resource "terraform_data" "application_deletion_protection" {
   for_each = var.enable_deletion_protection ? var.applications : {}
 
@@ -100,7 +97,8 @@ resource "scaleway_iam_api_key" "this" {
 # - Organize groups by role or function
 # - Use descriptive names that indicate the group's purpose
 #
-# SECURITY: Lifecycle protection enabled by default to prevent accidental deletion.
+# SECURITY: A terraform_data guard (prevent_destroy) is created by default to
+# block accidental deletion. See var.enable_deletion_protection to lift it.
 # ==============================================================================
 
 resource "scaleway_iam_group" "this" {
@@ -115,8 +113,6 @@ resource "scaleway_iam_group" "this" {
   # This allows for more flexible membership management
 
   lifecycle {
-    prevent_destroy = false # Controlled via terraform_data below
-
     # IMPORTANT: Ignore changes to membership attributes because we manage
     # memberships via the separate scaleway_iam_group_membership resource.
     # Without this, the group resource would try to remove memberships on
@@ -133,7 +129,7 @@ resource "scaleway_iam_group" "this" {
   ]
 }
 
-# Deletion protection check for groups
+# Deletion protection guard for groups
 resource "terraform_data" "group_deletion_protection" {
   for_each = var.enable_deletion_protection ? var.groups : {}
 
@@ -194,7 +190,12 @@ resource "scaleway_iam_group_membership" "users" {
 # - Applications (application_id)
 # - No principal (no_principal = true) for reusable policy templates
 #
-# SECURITY: Lifecycle protection enabled by default.
+# A policy has a single principal: the first entry of the first non-empty list
+# among user_ids, group_keys, application_keys. Other entries are ignored and
+# reported by the policy_single_principal check.
+#
+# SECURITY: A terraform_data guard (prevent_destroy) is created by default to
+# block accidental deletion. See var.enable_deletion_protection to lift it.
 # ==============================================================================
 
 resource "scaleway_iam_policy" "this" {
@@ -242,10 +243,6 @@ resource "scaleway_iam_policy" "this" {
     }
   }
 
-  lifecycle {
-    prevent_destroy = false # Controlled via terraform_data below
-  }
-
   depends_on = [
     scaleway_iam_application.this,
     scaleway_iam_group.this,
@@ -253,7 +250,7 @@ resource "scaleway_iam_policy" "this" {
   ]
 }
 
-# Deletion protection check for policies
+# Deletion protection guard for policies
 resource "terraform_data" "policy_deletion_protection" {
   for_each = var.enable_deletion_protection ? var.policies : {}
 
@@ -262,6 +259,14 @@ resource "terraform_data" "policy_deletion_protection" {
   }
 
   depends_on = [scaleway_iam_policy.this]
+}
+
+# Warns about principals that a policy lists but cannot use (it has one only)
+check "policy_single_principal" {
+  assert {
+    condition     = length(local.policies_with_ignored_principals) == 0
+    error_message = "Policies ${join(", ", local.policies_with_ignored_principals)} list more principals than a policy accepts: only the first entry of user_ids, then group_keys, then application_keys is used (none with no_principal = true); the others are ignored."
+  }
 }
 
 # ==============================================================================
