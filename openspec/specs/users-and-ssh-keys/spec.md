@@ -32,7 +32,7 @@ The `users` output SHALL expose per user `id`, `created_at`, `updated_at`, `stat
 - **THEN** `users`, `user_ids` and `user_details` are empty maps
 
 ### Requirement: SSH keys
-`ssh_keys` SHALL be a map of objects with `name` and `public_key` (required), `project_id` (optional) and `disabled` (default `false`). The module SHALL create one `scaleway_iam_ssh_key` per key, in `project_id` when set, otherwise in the project resolved from `project_name`. `name` MUST start with a letter, contain only letters, digits, hyphens and underscores (max 63). `public_key` MUST start with `ssh-rsa`, `ssh-ed25519` or `ssh-ecdsa` and a base64 body. `project_id` MUST be a lowercase UUID.
+`ssh_keys` SHALL be a map of objects with `name` and `public_key` (required), `project_id` (optional) and `disabled` (default `false`). The module SHALL create one `scaleway_iam_ssh_key` per key, in `project_id` when set, otherwise in the project resolved from `project_name`. When `project_name` is `null`, every key MUST set `project_id`. `name`, `public_key` and `project_id` MUST follow the formats in the scenarios.
 
 #### Scenario: Key in the module project
 - **WHEN** `project_name = "my-project"` and an SSH key has no `project_id`
@@ -41,6 +41,14 @@ The `users` output SHALL expose per user `id`, `created_at`, `updated_at`, `stat
 #### Scenario: Key in another project
 - **WHEN** an SSH key has `project_id = "<uuid>"`
 - **THEN** the key is created in that project
+
+#### Scenario: Key without any project
+- **WHEN** `project_name` is `null` and an SSH key has no `project_id`
+- **THEN** the plan fails with "Each SSH key needs a project_id when project_name is not set."
+
+#### Scenario: Key with its own project and no project name
+- **WHEN** `project_name` is `null` and every SSH key has a `project_id`
+- **THEN** the plan succeeds
 
 #### Scenario: Invalid key name
 - **WHEN** an SSH key has `name = "my key"`

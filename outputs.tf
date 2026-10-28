@@ -177,13 +177,13 @@ output "policy_ids" {
 # ==============================================================================
 # User Outputs
 # ------------------------------------------------------------------------------
-# SECURITY: User information contains PII (email addresses).
-# This output is marked sensitive to prevent accidental exposure.
+# SECURITY: User email addresses are PII. They are kept out of `users` and only
+# exposed by `user_details`, which is marked sensitive.
 # ==============================================================================
 
 output "users" {
   description = <<-EOT
-    Map of all created IAM users (SENSITIVE - contains PII).
+    Map of all created IAM users (non-sensitive, no email address).
 
     Each entry contains:
     - id: The user's unique identifier
@@ -192,8 +192,8 @@ output "users" {
     - status: The user's account status
     - type: The user's type (owner, guest, etc.)
 
-    Note: Email addresses are excluded from non-sensitive outputs.
-    Use user_details output if you need email addresses.
+    Note: Email addresses are excluded from this output.
+    Use the sensitive user_details output if you need email addresses.
   EOT
   value = {
     for k, v in scaleway_iam_user.this : k => {
@@ -344,11 +344,12 @@ output "security_audit" {
   description = <<-EOT
     Security-relevant information for auditing.
 
-    Includes:
-    - API keys without expiration (security risk)
-    - API keys with expiration set
-    - Disabled SSH keys
-    - Active SSH keys
+    Lists of input map keys:
+    - api_keys_without_expiration: API keys without expires_at (security risk)
+    - api_keys_expiring_soon: every API key that has an expires_at, whatever
+      the date (the name is kept for compatibility; it is not a time window)
+    - disabled_ssh_keys: SSH keys with disabled = true
+    - active_ssh_keys: SSH keys with disabled = false
   EOT
   value = {
     api_keys_without_expiration = [

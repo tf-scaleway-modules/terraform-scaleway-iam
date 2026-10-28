@@ -39,8 +39,9 @@ context: |
   validation blocks), outputs.tf (20 outputs; api_keys and user_details are
   sensitive), locals.tf (id maps and group membership flattening), data.tf
   (project lookup by name), versions.tf. Runnable examples live in
-  examples/minimal and examples/complete. There is no tests/ directory yet:
-  new behaviour adds tests/main.tftest.hcl (run with tofu test).
+  examples/minimal and examples/complete. Unit tests live in
+  tests/main.tftest.hcl (mock provider, run with tofu test); the check block is
+  in main.tf.
 
   Module-specific conventions (the generic ones are standards in the
   quality, repository and terraform stores, fetched on demand): every resource
@@ -51,7 +52,7 @@ context: |
   nothing is edited by hand under "## [Unreleased]"; versions follow semver.
 
   Commands: tofu fmt -recursive; tofu init -backend=false && tofu validate;
-  tflint --recursive; tofu test (only once tests/ exists); pre-commit run -a;
+  tflint --recursive; tofu test (unit tests in tests/main.tftest.hcl, mock provider, no account); pre-commit run -a;
   mise run changelog; mise run spec-validate.
 
   Standards: fetch the referenced-store specs listed in these instructions
@@ -69,7 +70,7 @@ rules:
     - Explain how the change avoids a perpetual diff and how existing state migrates (moved blocks, in-place update or forced replacement)
     - Keep provider {} and backend {} out of the module and never shell out to a CLI
   tasks:
-    - Include unit tests in tests/main.tftest.hcl (the directory does not exist yet, the first behaviour change creates it), and examples/complete plus any example the change affects
+    - Include unit tests in tests/main.tftest.hcl (a rejected-input run per new validation, a run per check), and examples/complete plus any example the change affects
     - Include tofu fmt -recursive, tofu validate, tflint --recursive, tofu test and pre-commit run -a (terraform-docs README regeneration)
     - Write commit subjects that read as CHANGELOG lines (git-cliff generates CHANGELOG.md, do not edit it by hand) and note upgrade steps for anything breaking in the README; update the README when the compatibility matrix or the what-lands-in-state table changes
     - Reuse the existing capability directories under openspec/specs (module-contract, applications-and-api-keys, groups, policies, users-and-ssh-keys, deletion-protection) before creating a new one
@@ -78,7 +79,7 @@ operations:
   apply:
     guidance:
       - Apply the quality store (simplicity, efficiency, security, production-readiness) to every task; fetch terraform-code-style, terraform-variables and terraform-outputs from the terraform store before editing HCL; flag any deviation with a DEVIATION(<spec-id>) comment
-      - Run tofu fmt -recursive, tofu validate and tofu test (when tests/ exists) after each task group and do not mark a task done while they fail
+      - Run tofu fmt -recursive, tofu validate and tofu test after each task group and do not mark a task done while they fail
       - Never run tofu apply or any command against a real Scaleway organization unless the user asked; say explicitly when it was skipped
       - Report test and scanner output as-is, including failures
   archive:

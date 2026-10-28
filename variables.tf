@@ -70,7 +70,8 @@ variable "tags" {
 
     Format: List of strings (e.g., ["env=prod", "team=devops"])
 
-    NOTE: Scaleway tags cannot contain colons (:). Use = or _ instead.
+    NOTE: The module does not validate tags; the Scaleway API enforces its own
+    tag rules (see the Scaleway IAM documentation).
   EOT
   type        = list(string)
   default     = []
@@ -86,14 +87,22 @@ variable "enable_deletion_protection" {
   description = <<-EOT
     Enable deletion protection for critical IAM resources.
 
-    When enabled, prevents accidental deletion of:
+    When enabled, a terraform_data guard with prevent_destroy protects each of:
     - IAM Applications
     - IAM Groups
     - IAM Policies
 
-    Set to false only in development or when intentionally destroying resources.
+    Any plan that destroys a guard fails: terraform destroy, removing an entry
+    from applications, groups or policies, and switching this flag from true to
+    false on an existing deployment (prevent_destroy cannot be switched off by
+    a variable). Set it to false at creation for development environments.
 
-    IMPORTANT: You must set this to false before running terraform destroy.
+    To lift protection on an existing deployment, remove the guards from state
+    first (this leaves the IAM resources untouched), then destroy or remove the
+    entry:
+    - all: terraform state rm 'module.<name>.terraform_data.application_deletion_protection'
+      (same for group_deletion_protection and policy_deletion_protection)
+    - one entry: terraform state rm 'module.<name>.terraform_data.application_deletion_protection["<key>"]'
   EOT
   type        = bool
   default     = true
@@ -103,8 +112,8 @@ variable "require_api_key_expiration" {
   description = <<-EOT
     Require all API keys to have an expiration date.
 
-    When enabled, the module will fail validation if any API key
-    is configured without an expires_at value.
+    When enabled, the plan fails (resource precondition on the API key) if any
+    API key is configured without an expires_at value.
 
     This is a security best practice to ensure credentials are rotated.
   EOT
@@ -185,7 +194,7 @@ variable "api_keys" {
     IMPORTANT: Each key must be associated with EITHER an application_key
     OR a user_id, but NOT both.
 
-    - application_key: Reference to an application defined in var.applications
+    - application_key: Key of an application defined in var.applications
     - user_id: UUID of an existing IAM user
 
     The default_project_id can be used to set a default project context
@@ -229,6 +238,14 @@ variable "api_keys" {
       (v.application_key == null && v.user_id != null)
     ])
     error_message = "Each API key must specify either 'application_key' or 'user_id', but not both."
+  }
+
+  validation {
+    condition = alltrue([
+      for k, v in var.api_keys :
+      v.application_key == null || contains(keys(var.applications), v.application_key)
+    ])
+    error_message = "application_key must be a key of the applications input."
   }
 
   validation {
@@ -325,6 +342,24 @@ variable "groups" {
     ])
     error_message = "All user_ids must be valid UUID format."
   }
+
+  validation {
+    condition = alltrue([
+      for k, v in var.groups : v.external_membership || alltrue([
+        for app_key in v.application_keys : contains(keys(var.applications), app_key)
+      ])
+    ])
+    error_message = "Group application_keys must be keys of the applications input."
+  }
+
+  # Membership keys use the first 8 characters of the user ID
+  validation {
+    condition = alltrue([
+      for k, v in var.groups :
+      v.external_membership || length(distinct([for user_id in v.user_ids : substr(user_id, 0, 8)])) == length(v.user_ids)
+    ])
+    error_message = "user_ids of one group must be unique and must not share their first 8 characters (membership keys are derived from them)."
+  }
 }
 
 # ==============================================================================
@@ -350,6 +385,11 @@ variable "policies" {
 
     A policy can have multiple rules for different scopes.
 
+    A policy has a single principal (or none with no_principal = true): the
+    first entry of user_ids, otherwise of group_keys, otherwise of
+    application_keys. Other entries are ignored and reported by the
+    policy_single_principal check.
+
     Common permission sets:
     - AllProductsFullAccess: Full access to all products
     - AllProductsReadOnly: Read-only access to all products
@@ -364,10 +404,7 @@ variable "policies" {
       admin_policy = {
         name        = "admin-full-access"
         description = "Full administrative access"
-        no_principal = false
-        user_ids = ["xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"]
-        group_keys = ["admins"]
-        application_keys = ["terraform"]
+        group_keys  = ["admins"]
         rules = [
           {
             permission_set_names = ["AllProductsFullAccess"]
@@ -438,6 +475,27 @@ variable "policies" {
       ])
     ])
     error_message = "All user_ids must be valid UUID format."
+  }
+
+  # Only the entry that selects the principal is used, so only it is checked
+  validation {
+    condition = alltrue([
+      for k, v in var.policies :
+      v.no_principal || length(v.user_ids) > 0 || length(v.group_keys) == 0
+      ? true
+      : contains(keys(var.groups), v.group_keys[0])
+    ])
+    error_message = "The group_keys entry that selects a policy principal must be a key of the groups input."
+  }
+
+  validation {
+    condition = alltrue([
+      for k, v in var.policies :
+      v.no_principal || length(v.user_ids) > 0 || length(v.group_keys) > 0 || length(v.application_keys) == 0
+      ? true
+      : contains(keys(var.applications), v.application_keys[0])
+    ])
+    error_message = "The application_keys entry that selects a policy principal must be a key of the applications input."
   }
 }
 
@@ -516,7 +574,8 @@ variable "ssh_keys" {
 
     Keys are associated with the project specified in var.project_name.
     If project_id is specified in the key configuration, it overrides
-    the default project.
+    the default project. When project_name is null, every key must set
+    project_id.
 
     You can provide the public key directly or use file() function
     to read from a file.
@@ -579,5 +638,10 @@ variable "ssh_keys" {
       v.project_id == null || can(regex("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", v.project_id))
     ])
     error_message = "project_id must be a valid UUID format."
+  }
+
+  validation {
+    condition     = var.project_name != null || alltrue([for k, v in var.ssh_keys : v.project_id != null])
+    error_message = "Each SSH key needs a project_id when project_name is not set."
   }
 }

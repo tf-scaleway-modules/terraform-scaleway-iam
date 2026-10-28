@@ -34,6 +34,13 @@ locals {
     for k, v in scaleway_iam_user.this : k => v.id
   }
 
+  # Policies listing principals that are not used: a policy has a single
+  # principal (or none with no_principal)
+  policies_with_ignored_principals = [
+    for k, v in var.policies : k
+    if length(v.user_ids) + length(v.group_keys) + length(v.application_keys) > (v.no_principal ? 0 : 1)
+  ]
+
   # ==============================================================================
   # Group Membership Flattening
   # ------------------------------------------------------------------------------
