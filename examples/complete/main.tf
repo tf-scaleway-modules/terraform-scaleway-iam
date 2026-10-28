@@ -3,7 +3,7 @@
 # ║                                                                                ║
 # ║  This example demonstrates all features of the Scaleway IAM module:           ║
 # ║  - Applications (service accounts)                                            ║
-# ║  - API Keys with expiration                                                    ║
+# ║  - API Keys with expiration and Secret Manager secret storage                 ║
 # ║  - Groups with memberships                                                     ║
 # ║  - Policies with organization and project-level rules                         ║
 # ║  - Users with invitation settings                                             ║
@@ -32,6 +32,22 @@ variable "project_name" {
 data "scaleway_account_project" "this" {
   name            = var.project_name
   organization_id = var.organization_id
+}
+
+# ==============================================================================
+# Secret Manager secret receiving the secret key of one API key
+# ==============================================================================
+# The module does not create the secret. Reading the latest secret key later,
+# for example in a consumer configuration:
+#
+#   ephemeral "scaleway_secret_version" "terraform_key" {
+#     secret_id = scaleway_secret.terraform_key.id
+#     revision  = "latest_enabled"
+#   }
+
+resource "scaleway_secret" "terraform_key" {
+  name       = "iam-terraform-api-key"
+  project_id = data.scaleway_account_project.this.id
 }
 
 # ==============================================================================
@@ -101,6 +117,8 @@ module "iam" {
       application_key    = "terraform"
       description        = "Terraform automation API key"
       default_project_id = data.scaleway_account_project.this.id
+      # The secret key goes to Secret Manager and never reaches the state
+      secret_id = scaleway_secret.terraform_key.id
       # No expiration for long-running automation
     }
 

@@ -70,7 +70,9 @@ output "api_keys" {
     Each entry contains:
     - id: The API key's unique identifier
     - access_key: The access key (public part)
-    - secret_key: The secret key (SENSITIVE - handle with extreme care)
+    - secret_key: The secret key (SENSITIVE - handle with extreme care). It is
+      null when the key sets secret_id: read it from the Secret Manager secret
+      instead, for example with scaleway_secret_version
     - description: The API key's description
     - created_at: Creation timestamp
     - expires_at: Expiration timestamp (if set)
@@ -348,6 +350,8 @@ output "security_audit" {
     - api_keys_without_expiration: API keys without expires_at (security risk)
     - api_keys_expiring_soon: every API key that has an expires_at, whatever
       the date (the name is kept for compatibility; it is not a time window)
+    - api_keys_secret_in_state: API keys without secret_id (their secret key
+      is stored in the state)
     - disabled_ssh_keys: SSH keys with disabled = true
     - active_ssh_keys: SSH keys with disabled = false
   EOT
@@ -357,6 +361,9 @@ output "security_audit" {
     ]
     api_keys_expiring_soon = [
       for k, v in scaleway_iam_api_key.this : k if v.expires_at != null
+    ]
+    api_keys_secret_in_state = [
+      for k, v in scaleway_iam_api_key.this : k if v.secret_id == null
     ]
     disabled_ssh_keys = [
       for k, v in scaleway_iam_ssh_key.this : k if v.disabled

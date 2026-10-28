@@ -121,6 +121,20 @@ variable "require_api_key_expiration" {
   default     = false
 }
 
+# DEVIATION(terraform-variables): the name follows the released sibling
+# require_api_key_expiration instead of the enable_/is_ boolean prefix.
+variable "require_api_key_secret_id" {
+  description = <<-EOT
+    Require all API keys to store their secret key in Secret Manager.
+
+    When enabled, the plan fails (resource precondition on the API key) if any
+    API key is configured without a secret_id, so no API key secret lands in
+    the Terraform state.
+  EOT
+  type        = bool
+  default     = false
+}
+
 
 # ==============================================================================
 # IAM Applications
@@ -200,6 +214,13 @@ variable "api_keys" {
     The default_project_id can be used to set a default project context
     for API calls made with this key.
 
+    - secret_id: ID of an existing Secret Manager secret (UUID or
+      <region>/<uuid>) that receives the secret key as a new secret version.
+      The secret key is then kept out of the state and the module outputs
+      (api_keys[*].secret_key is null). The module does not create or manage
+      the secret. Changing secret_id on an existing key REPLACES the key (new
+      access key and secret key), treat it as a rotation.
+
     Example:
     ```hcl
     api_keys = {
@@ -208,6 +229,7 @@ variable "api_keys" {
         description        = "Terraform automation key"
         expires_at         = "2025-12-31T23:59:59Z"
         default_project_id = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+        secret_id          = "fr-par/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
       }
       user_automation = {
         user_id     = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
@@ -228,6 +250,7 @@ variable "api_keys" {
     description        = optional(string, "")
     expires_at         = optional(string)
     default_project_id = optional(string)
+    secret_id          = optional(string)
   }))
   default = {}
 
@@ -270,6 +293,14 @@ variable "api_keys" {
       v.expires_at == null || can(regex("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$", v.expires_at))
     ])
     error_message = "expires_at must be in ISO 8601 format (YYYY-MM-DDTHH:MM:SSZ)."
+  }
+
+  validation {
+    condition = alltrue([
+      for k, v in var.api_keys :
+      v.secret_id == null || can(regex("^([a-z]{2}-[a-z]{3}/)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", v.secret_id))
+    ])
+    error_message = "secret_id must be a UUID or a regional ID (<region>/<uuid>)."
   }
 }
 
@@ -384,6 +415,10 @@ variable "policies" {
     - project_ids: For project-specific permissions (optional)
 
     A policy can have multiple rules for different scopes.
+
+    All permission_set_names of one rule must share a scope (organization or
+    project): the provider (2.89.0 and later) rejects a rule that mixes them
+    at plan time. Split such a rule into two rules.
 
     A policy has a single principal (or none with no_principal = true): the
     first entry of user_ids, otherwise of group_keys, otherwise of
