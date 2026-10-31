@@ -292,3 +292,120 @@ run "ssh_key_with_own_project_and_no_project_name" {
     error_message = "SSH key must use its own project_id"
   }
 }
+
+run "api_key_secret_id_and_audit" {
+  command = plan
+
+  variables {
+    applications = { terraform = { name = "terraform" } }
+    api_keys = {
+      stored = {
+        application_key = "terraform"
+        secret_id       = "55555555-5555-4555-8555-555555555555"
+      }
+      in_state = { application_key = "terraform" }
+    }
+  }
+
+  assert {
+    condition     = scaleway_iam_api_key.this["stored"].secret_id == "55555555-5555-4555-8555-555555555555"
+    error_message = "secret_id must be passed to the API key"
+  }
+
+  assert {
+    condition     = output.security_audit.api_keys_secret_in_state == ["in_state"]
+    error_message = "api_keys_secret_in_state must list only the keys without secret_id"
+  }
+
+  # The mocked provider cannot express that the provider leaves secret_key unset
+  # (it is a computed attribute), so the null secret_key is asserted through
+  # secret_id above and proven by the real-organization example run.
+}
+
+run "api_key_secret_id_regional" {
+  command = plan
+
+  variables {
+    applications = { terraform = { name = "terraform" } }
+    api_keys = {
+      stored = {
+        application_key = "terraform"
+        secret_id       = "fr-par/55555555-5555-4555-8555-555555555555"
+      }
+    }
+  }
+
+  assert {
+    condition     = scaleway_iam_api_key.this["stored"].secret_id == "fr-par/55555555-5555-4555-8555-555555555555"
+    error_message = "A regional secret_id must be accepted and passed unchanged"
+  }
+}
+
+run "api_key_secret_id_invalid" {
+  command = plan
+
+  variables {
+    applications = { terraform = { name = "terraform" } }
+    api_keys = {
+      stored = { application_key = "terraform", secret_id = "my-secret" }
+    }
+  }
+
+  expect_failures = [var.api_keys]
+}
+
+run "require_api_key_secret_id_rejects_key_without_secret_id" {
+  command = plan
+
+  variables {
+    require_api_key_secret_id = true
+    applications              = { terraform = { name = "terraform" } }
+    api_keys = {
+      in_state = { application_key = "terraform" }
+    }
+  }
+
+  expect_failures = [scaleway_iam_api_key.this["in_state"]]
+}
+
+run "require_api_key_secret_id_accepts_all_keys_with_secret_id" {
+  command = plan
+
+  variables {
+    require_api_key_secret_id = true
+    applications              = { terraform = { name = "terraform" } }
+    api_keys = {
+      stored = {
+        application_key = "terraform"
+        secret_id       = "55555555-5555-4555-8555-555555555555"
+      }
+    }
+  }
+
+  assert {
+    condition     = length(output.security_audit.api_keys_secret_in_state) == 0
+    error_message = "No key may be reported in state when every key sets secret_id"
+  }
+}
+
+run "policy_rule_permission_sets_passed_through" {
+  command = plan
+
+  variables {
+    policies = {
+      dev = {
+        name         = "dev"
+        no_principal = true
+        rules = [
+          { permission_set_names = ["IAMReadOnly", "BillingReadOnly"], organization_id = "11111111-1111-4111-8111-111111111111" },
+          { permission_set_names = ["InstancesFullAccess"], project_ids = ["22222222-2222-4222-8222-222222222222"] },
+        ]
+      }
+    }
+  }
+
+  assert {
+    condition     = length(scaleway_iam_policy.this["dev"].rule) == 2
+    error_message = "Each rule must be passed to the policy unchanged"
+  }
+}

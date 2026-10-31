@@ -62,7 +62,9 @@ resource "terraform_data" "application_deletion_protection" {
 # - Use application keys over user keys when possible
 # - Rotate keys regularly
 #
-# SECURITY: Preconditions enforce expiration requirements when configured.
+# SECURITY: Preconditions enforce expiration and secret_id requirements when
+# configured. With secret_id set, the secret key is stored in Secret Manager
+# and never reaches the state.
 # ==============================================================================
 
 resource "scaleway_iam_api_key" "this" {
@@ -76,11 +78,19 @@ resource "scaleway_iam_api_key" "this" {
   expires_at         = each.value.expires_at
   default_project_id = each.value.default_project_id
 
+  # Secret Manager secret receiving the secret key (kept out of state when set)
+  secret_id = each.value.secret_id
+
   # Security preconditions
   lifecycle {
     precondition {
       condition     = !var.require_api_key_expiration || each.value.expires_at != null
       error_message = "API key '${each.key}' must have an expiration date (expires_at) when require_api_key_expiration is enabled."
+    }
+
+    precondition {
+      condition     = !var.require_api_key_secret_id || each.value.secret_id != null
+      error_message = "API key '${each.key}' must set secret_id when require_api_key_secret_id is enabled."
     }
   }
 
