@@ -4,7 +4,7 @@
 
 | Data | Where | In state | Mitigation |
 |------|-------|----------|------------|
-| `api_keys[*].secret_key` | `api_keys` output (sensitive) | Yes, unless the key sets `secret_id` | Set `secret_id` to a Secret Manager secret: the provider stores the secret key as a secret version and leaves it out of state and outputs (`secret_key` is `null`). Enforce it with `require_api_key_secret_id = true`; `security_audit.api_keys_secret_in_state` lists the keys that still store it. Encrypt the state at rest and restrict access to it. |
+| API key secret key | `api_key_secret_keys` output (sensitive), only for keys without `secret_id` | Yes, unless the key sets `secret_id` | Set `secret_id` to a Secret Manager secret: the provider stores the secret key as a secret version and leaves it out of state and outputs. `require_api_key_secret_id` defaults to `true` and fails the plan for any key without `secret_id`; only an explicit `false` lets a secret key land in state, and `security_audit.api_keys_secret_in_state` lists those keys. The `api_keys` output never holds a secret key. Encrypt the state at rest and restrict access to it. |
 | `user_details[*].email` | `user_details` output (sensitive) | Yes (the provider stores the email of every user) | The `users` output omits it; read `user_details` only where needed. Encrypt the state at rest and restrict access to it. |
 
 The module creates no other secret. `secret_id` is an identifier, not a secret.

@@ -14,8 +14,13 @@ variable "organization_id" {
   type        = string
 }
 
-variable "project_name" {
-  description = "Your Scaleway Project name"
+variable "project_id" {
+  description = "Your Scaleway Project ID"
+  type        = string
+}
+
+variable "secret_id" {
+  description = "ID of the Secret Manager secret receiving the API key secret key (UUID or <region>/<uuid>)"
   type        = string
 }
 
@@ -27,7 +32,7 @@ module "iam" {
   source = "../.."
 
   organization_id = var.organization_id
-  project_name    = var.project_name
+  project_id      = var.project_id
 
   # Global tags
   tags = ["managed-by:terraform"]
@@ -43,11 +48,13 @@ module "iam" {
     }
   }
 
-  # Create an API key for the application
+  # Create an API key for the application. Its secret key goes to the Secret
+  # Manager secret (required by default) and never reaches the state.
   api_keys = {
     terraform_key = {
       application_key = "terraform"
       description     = "Terraform API key"
+      secret_id       = var.secret_id
     }
   }
 }

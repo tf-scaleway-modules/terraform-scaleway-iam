@@ -11,7 +11,7 @@
 # ║                                                                                ║
 # ║  SECURITY FEATURES:                                                           ║
 # ║  - Lifecycle protection for critical resources                                 ║
-# ║  - API key expiration enforcement                                              ║
+# ║  - API key expiration and secret_id enforcement (secret_id by default)        ║
 # ║  - Preconditions for security validation                                       ║
 # ╚══════════════════════════════════════════════════════════════════════════════╝
 
@@ -76,7 +76,7 @@ resource "scaleway_iam_api_key" "this" {
 
   description        = each.value.description
   expires_at         = each.value.expires_at
-  default_project_id = each.value.default_project_id
+  default_project_id = each.value.default_project_id != null ? each.value.default_project_id : var.project_id
 
   # Secret Manager secret receiving the secret key (kept out of state when set)
   secret_id = each.value.secret_id
@@ -93,8 +93,6 @@ resource "scaleway_iam_api_key" "this" {
       error_message = "API key '${each.key}' must set secret_id when require_api_key_secret_id is enabled."
     }
   }
-
-  depends_on = [scaleway_iam_application.this]
 }
 
 # ==============================================================================
@@ -119,24 +117,9 @@ resource "scaleway_iam_group" "this" {
   organization_id = var.organization_id
   tags            = distinct(concat(var.tags, each.value.tags))
 
-  # Membership is managed via scaleway_iam_group_membership resources below
-  # This allows for more flexible membership management
-
-  lifecycle {
-    # IMPORTANT: Ignore changes to membership attributes because we manage
-    # memberships via the separate scaleway_iam_group_membership resource.
-    # Without this, the group resource would try to remove memberships on
-    # each apply, causing an infinite create/delete cycle.
-    ignore_changes = [
-      application_ids,
-      user_ids,
-    ]
-  }
-
-  depends_on = [
-    scaleway_iam_application.this,
-    scaleway_iam_user.this
-  ]
+  # Members come from the scaleway_iam_group_membership resources below: the
+  # provider must neither write nor read them on the group itself.
+  external_membership = true
 }
 
 # Deletion protection guard for groups
@@ -161,28 +144,20 @@ resource "scaleway_iam_group_membership" "applications" {
 
   group_id       = scaleway_iam_group.this[each.value.group_key].id
   application_id = scaleway_iam_application.this[each.value.application_key].id
-
-  depends_on = [
-    scaleway_iam_group.this,
-    scaleway_iam_application.this
-  ]
 }
 
 # ==============================================================================
 # IAM Group Memberships - Users
 # ------------------------------------------------------------------------------
-# Manages user memberships in groups.
+# Manages user memberships in groups: existing users by ID (user_ids) and
+# users created by this module by key (user_keys), known in the same apply.
 # ==============================================================================
 
 resource "scaleway_iam_group_membership" "users" {
   for_each = local.group_user_membership_map
 
   group_id = scaleway_iam_group.this[each.value.group_key].id
-  user_id  = each.value.user_id
-
-  depends_on = [
-    scaleway_iam_group.this
-  ]
+  user_id  = each.value.user_key != null ? scaleway_iam_user.this[each.value.user_key].id : each.value.user_id
 }
 
 # ==============================================================================
@@ -193,16 +168,13 @@ resource "scaleway_iam_group_membership" "users" {
 # Each rule specifies:
 # - Which permission sets to grant
 # - At what scope (organization or project level)
+# - An optional condition (CEL expression)
 #
-# A policy can target:
-# - Users directly (user_id)
-# - Groups (group_id)
-# - Applications (application_id)
+# A policy has exactly one principal (validated on var.policies):
+# - A user (user_id)
+# - A group (group_key)
+# - An application (application_key)
 # - No principal (no_principal = true) for reusable policy templates
-#
-# A policy has a single principal: the first entry of the first non-empty list
-# among user_ids, group_keys, application_keys. Other entries are ignored and
-# reported by the policy_single_principal check.
 #
 # SECURITY: A terraform_data guard (prevent_destroy) is created by default to
 # block accidental deletion. See var.enable_deletion_protection to lift it.
@@ -216,48 +188,21 @@ resource "scaleway_iam_policy" "this" {
   organization_id = var.organization_id
   tags            = distinct(concat(var.tags, each.value.tags))
 
-  # Only one of these can be set - they are mutually exclusive
-  # Priority: no_principal > user_id > group_id > application_id
-  no_principal = each.value.no_principal ? true : null
+  # The provider requires exactly one of these four, as does the variable validation
+  user_id        = each.value.user_id
+  group_id       = each.value.group_key != null ? scaleway_iam_group.this[each.value.group_key].id : null
+  application_id = each.value.application_key != null ? scaleway_iam_application.this[each.value.application_key].id : null
+  no_principal   = each.value.no_principal ? true : null
 
-  user_id = (
-    !each.value.no_principal && length(each.value.user_ids) > 0
-    ? each.value.user_ids[0]
-    : null
-  )
-
-  group_id = (
-    !each.value.no_principal &&
-    length(each.value.user_ids) == 0 &&
-    length(each.value.group_keys) > 0
-    ? scaleway_iam_group.this[each.value.group_keys[0]].id
-    : null
-  )
-
-  application_id = (
-    !each.value.no_principal &&
-    length(each.value.user_ids) == 0 &&
-    length(each.value.group_keys) == 0 &&
-    length(each.value.application_keys) > 0
-    ? scaleway_iam_application.this[each.value.application_keys[0]].id
-    : null
-  )
-
-  # Define permission rules
   dynamic "rule" {
     for_each = each.value.rules
     content {
       permission_set_names = rule.value.permission_set_names
-      organization_id      = rule.value.organization_id
+      organization_id      = rule.value.organization_wide ? var.organization_id : null
       project_ids          = rule.value.project_ids
+      condition            = rule.value.condition
     }
   }
-
-  depends_on = [
-    scaleway_iam_application.this,
-    scaleway_iam_group.this,
-    scaleway_iam_user.this
-  ]
 }
 
 # Deletion protection guard for policies
@@ -269,14 +214,6 @@ resource "terraform_data" "policy_deletion_protection" {
   }
 
   depends_on = [scaleway_iam_policy.this]
-}
-
-# Warns about principals that a policy lists but cannot use (it has one only)
-check "policy_single_principal" {
-  assert {
-    condition     = length(local.policies_with_ignored_principals) == 0
-    error_message = "Policies ${join(", ", local.policies_with_ignored_principals)} list more principals than a policy accepts: only the first entry of user_ids, then group_keys, then application_keys is used (none with no_principal = true); the others are ignored."
-  }
 }
 
 # ==============================================================================
@@ -307,7 +244,7 @@ resource "scaleway_iam_user" "this" {
 # SSH keys provide secure access to Scaleway Instances and other resources.
 #
 # Keys are project-scoped and can be:
-# - Associated with the default project (from var.project_name)
+# - Associated with the default project (var.project_id)
 # - Associated with a specific project (via project_id override)
 #
 # Security best practices:
@@ -331,6 +268,6 @@ resource "scaleway_iam_ssh_key" "this" {
 
   name       = each.value.name
   public_key = each.value.public_key
-  project_id = coalesce(each.value.project_id, local.project_id)
+  project_id = each.value.project_id != null ? each.value.project_id : var.project_id
   disabled   = each.value.disabled
 }
