@@ -32,7 +32,7 @@ context: |
   module was released; openspec/specs/ describes the released behaviour.
 
   Stack: HCL only. required_version >= 1.10.7. Providers pinned with ~> in
-  versions.tf: scaleway/scaleway ~> 2.86. Every tool is pinned in mise.toml.
+  versions.tf: scaleway/scaleway ~> 2.89. Every tool is pinned in mise.toml.
 
   Layout: one .tf file per theme at the repository root: main.tf (all IAM
   resources and the terraform_data deletion guards), variables.tf (inputs with
