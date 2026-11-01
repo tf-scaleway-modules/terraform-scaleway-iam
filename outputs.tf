@@ -5,20 +5,11 @@
 # ║  or root configurations.                                                       ║
 # ║                                                                                ║
 # ║  SECURITY NOTES:                                                              ║
-# ║  - Outputs containing secrets are marked sensitive = true                     ║
-# ║  - User PII (emails) is marked sensitive                                      ║
-# ║  - Consider using a secrets manager for API key storage                       ║
+# ║  - Only api_key_secret_keys (secret keys) and user_details (emails) are       ║
+# ║    sensitive; every other output is free of secrets and PII                   ║
+# ║  - A secret key stays out of the state when its API key sets secret_id        ║
 # ║  - Terraform state contains sensitive values - encrypt at rest               ║
 # ╚══════════════════════════════════════════════════════════════════════════════╝
-
-# ==============================================================================
-# Project Outputs
-# ==============================================================================
-
-output "project_id" {
-  description = "The ID of the Scaleway project (if project_name was provided)."
-  value       = local.project_id
-}
 
 # ==============================================================================
 # Application Outputs
@@ -50,64 +41,58 @@ output "applications" {
 
 output "application_ids" {
   description = "Map of application keys to their IDs for easy lookup."
-  value       = local.application_ids
+  value       = { for k, v in scaleway_iam_application.this : k => v.id }
 }
 
 # ==============================================================================
 # API Key Outputs
 # ------------------------------------------------------------------------------
-# SECURITY: API key secrets are highly sensitive. These outputs are marked
-# sensitive but will still be stored in Terraform state. Ensure:
-# - State is encrypted at rest
-# - State access is restricted
-# - Consider using a secrets manager instead of state outputs
+# SECURITY: the secret keys are split from the rest of the API key data so that
+# api_keys can stay readable. A key that sets secret_id has no secret key in
+# state or outputs: it is read from the Secret Manager secret.
 # ==============================================================================
 
 output "api_keys" {
   description = <<-EOT
-    Map of all created IAM API keys (SENSITIVE).
+    Map of all created IAM API keys (no secret key).
 
     Each entry contains:
     - id: The API key's unique identifier
     - access_key: The access key (public part)
-    - secret_key: The secret key (SENSITIVE - handle with extreme care). It is
-      null when the key sets secret_id: read it from the Secret Manager secret
-      instead, for example with scaleway_secret_version
     - description: The API key's description
     - created_at: Creation timestamp
     - expires_at: Expiration timestamp (if set)
 
-    SECURITY WARNING:
-    - Store secrets in a secrets manager (Vault, AWS Secrets Manager, etc.)
-    - Never log or expose these values
-    - Rotate keys regularly
-    - This output is marked sensitive but values persist in state
+    The secret key is never part of this output: read it from
+    api_key_secret_keys, or, for a key that sets secret_id, from the Secret
+    Manager secret (for example with scaleway_secret_version).
   EOT
   value = {
     for k, v in scaleway_iam_api_key.this : k => {
       id          = v.id
       access_key  = v.access_key
-      secret_key  = v.secret_key
       description = v.description
       created_at  = v.created_at
       expires_at  = v.expires_at
     }
   }
+}
+
+output "api_key_secret_keys" {
+  description = <<-EOT
+    Map of API key keys to their secret key (SENSITIVE).
+
+    Only the keys WITHOUT secret_id appear here, and their secret key is
+    stored in the Terraform state. A key that sets secret_id is absent: its
+    secret key is in neither the state nor any output, read it from the Secret
+    Manager secret (for example with scaleway_secret_version).
+
+    Handle with extreme care: never log these values, rotate keys regularly.
+  EOT
+  value = {
+    for k, v in scaleway_iam_api_key.this : k => v.secret_key if v.secret_id == null
+  }
   sensitive = true
-}
-
-output "api_key_access_keys" {
-  description = "Map of API key names to their access keys (public part only, non-sensitive)."
-  value = {
-    for k, v in scaleway_iam_api_key.this : k => v.access_key
-  }
-}
-
-output "api_key_ids" {
-  description = "Map of API key names to their IDs."
-  value = {
-    for k, v in scaleway_iam_api_key.this : k => v.id
-  }
 }
 
 # ==============================================================================
@@ -138,7 +123,29 @@ output "groups" {
 
 output "group_ids" {
   description = "Map of group keys to their IDs for easy lookup."
-  value       = local.group_ids
+  value       = { for k, v in scaleway_iam_group.this : k => v.id }
+}
+
+output "group_memberships" {
+  description = <<-EOT
+    Summary of all group memberships created by this module.
+
+    Includes both application and user memberships organized by group.
+  EOT
+  value = {
+    applications = {
+      for k, v in scaleway_iam_group_membership.applications : k => {
+        group_id       = v.group_id
+        application_id = v.application_id
+      }
+    }
+    users = {
+      for k, v in scaleway_iam_group_membership.users : k => {
+        group_id = v.group_id
+        user_id  = v.user_id
+      }
+    }
+  }
 }
 
 # ==============================================================================
@@ -171,9 +178,7 @@ output "policies" {
 
 output "policy_ids" {
   description = "Map of policy keys to their IDs for easy lookup."
-  value = {
-    for k, v in scaleway_iam_policy.this : k => v.id
-  }
+  value       = { for k, v in scaleway_iam_policy.this : k => v.id }
 }
 
 # ==============================================================================
@@ -193,6 +198,8 @@ output "users" {
     - updated_at: Last update timestamp
     - status: The user's account status
     - type: The user's type (owner, guest, etc.)
+    - mfa: Whether the user has enabled multi-factor authentication
+    - locked: Whether the user is locked
 
     Note: Email addresses are excluded from this output.
     Use the sensitive user_details output if you need email addresses.
@@ -204,13 +211,15 @@ output "users" {
       updated_at = v.updated_at
       status     = v.status
       type       = v.type
+      mfa        = v.mfa
+      locked     = v.locked
     }
   }
 }
 
 output "user_ids" {
   description = "Map of user keys to their IDs for easy lookup."
-  value       = local.user_ids
+  value       = { for k, v in scaleway_iam_user.this : k => v.id }
 }
 
 output "user_details" {
@@ -252,8 +261,8 @@ output "ssh_keys" {
     - project_id: Associated project ID
     - disabled: Whether the key is disabled
 
-    Note: Public keys are not included in this output.
-    Use ssh_key_public_keys if you need them.
+    Note: Public keys are not included in this output; they are your own
+    input.
   EOT
   value = {
     for k, v in scaleway_iam_ssh_key.this : k => {
@@ -268,76 +277,6 @@ output "ssh_keys" {
   }
 }
 
-output "ssh_key_ids" {
-  description = "Map of SSH key names to their IDs for easy lookup."
-  value = {
-    for k, v in scaleway_iam_ssh_key.this : k => v.id
-  }
-}
-
-output "ssh_key_fingerprints" {
-  description = "Map of SSH key names to their fingerprints."
-  value = {
-    for k, v in scaleway_iam_ssh_key.this : k => v.fingerprint
-  }
-}
-
-output "ssh_key_public_keys" {
-  description = "Map of SSH key names to their public keys."
-  value = {
-    for k, v in scaleway_iam_ssh_key.this : k => v.public_key
-  }
-}
-
-# ==============================================================================
-# Group Membership Outputs
-# ==============================================================================
-
-output "group_memberships" {
-  description = <<-EOT
-    Summary of all group memberships created by this module.
-
-    Includes both application and user memberships organized by group.
-  EOT
-  value = {
-    applications = {
-      for k, v in scaleway_iam_group_membership.applications : k => {
-        group_id       = v.group_id
-        application_id = v.application_id
-      }
-    }
-    users = {
-      for k, v in scaleway_iam_group_membership.users : k => {
-        group_id = v.group_id
-        user_id  = v.user_id
-      }
-    }
-  }
-}
-
-# ==============================================================================
-# Summary Outputs
-# ==============================================================================
-
-output "summary" {
-  description = <<-EOT
-    Summary statistics for all IAM resources created by this module.
-
-    Useful for monitoring and auditing purposes.
-  EOT
-  value = {
-    organization_id         = var.organization_id
-    project_id              = local.project_id
-    applications_count      = length(scaleway_iam_application.this)
-    api_keys_count          = length(scaleway_iam_api_key.this)
-    groups_count            = length(scaleway_iam_group.this)
-    policies_count          = length(scaleway_iam_policy.this)
-    users_count             = length(scaleway_iam_user.this)
-    ssh_keys_count          = length(scaleway_iam_ssh_key.this)
-    group_memberships_count = length(scaleway_iam_group_membership.applications) + length(scaleway_iam_group_membership.users)
-  }
-}
-
 # ==============================================================================
 # Security Audit Outputs
 # ==============================================================================
@@ -348,10 +287,11 @@ output "security_audit" {
 
     Lists of input map keys:
     - api_keys_without_expiration: API keys without expires_at (security risk)
-    - api_keys_expiring_soon: every API key that has an expires_at, whatever
-      the date (the name is kept for compatibility; it is not a time window)
+    - api_keys_with_expiration: every API key that has an expires_at, whatever
+      the date (it is not a time window)
     - api_keys_secret_in_state: API keys without secret_id (their secret key
       is stored in the state)
+    - users_without_mfa: users whose mfa is not enabled
     - disabled_ssh_keys: SSH keys with disabled = true
     - active_ssh_keys: SSH keys with disabled = false
   EOT
@@ -359,11 +299,14 @@ output "security_audit" {
     api_keys_without_expiration = [
       for k, v in scaleway_iam_api_key.this : k if v.expires_at == null
     ]
-    api_keys_expiring_soon = [
+    api_keys_with_expiration = [
       for k, v in scaleway_iam_api_key.this : k if v.expires_at != null
     ]
     api_keys_secret_in_state = [
       for k, v in scaleway_iam_api_key.this : k if v.secret_id == null
+    ]
+    users_without_mfa = [
+      for k, v in scaleway_iam_user.this : k if !v.mfa
     ]
     disabled_ssh_keys = [
       for k, v in scaleway_iam_ssh_key.this : k if v.disabled

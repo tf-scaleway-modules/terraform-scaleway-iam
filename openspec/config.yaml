@@ -36,12 +36,12 @@ context: |
 
   Layout: one .tf file per theme at the repository root: main.tf (all IAM
   resources and the terraform_data deletion guards), variables.tf (inputs with
-  validation blocks), outputs.tf (20 outputs; api_keys and user_details are
-  sensitive), locals.tf (id maps and group membership flattening), data.tf
-  (project lookup by name), versions.tf. Runnable examples live in
+  validation blocks), outputs.tf (14 outputs; api_key_secret_keys and
+  user_details are sensitive), locals.tf (group membership flattening),
+  versions.tf. Runnable examples live in
   examples/minimal and examples/complete. Unit tests live in
-  tests/main.tftest.hcl (mock provider, run with tofu test); the check block is
-  in main.tf.
+  tests/main.tftest.hcl (mock provider, run with tofu test); the module has
+  no check block.
 
   Module-specific conventions (the generic ones are standards in the
   quality, repository and terraform stores, fetched on demand): every resource

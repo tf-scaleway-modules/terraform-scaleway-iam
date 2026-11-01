@@ -9,16 +9,5 @@ output "application_id" {
 
 output "api_key_access_key" {
   description = "The API key access key (public part)"
-  value       = module.iam.api_key_access_keys["terraform_key"]
-}
-
-output "api_key_secret" {
-  description = "The API key secret (sensitive)"
-  value       = module.iam.api_keys["terraform_key"].secret_key
-  sensitive   = true
-}
-
-output "summary" {
-  description = "Summary of created resources"
-  value       = module.iam.summary
+  value       = module.iam.api_keys["terraform_key"].access_key
 }

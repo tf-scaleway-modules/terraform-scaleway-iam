@@ -34,9 +34,9 @@ The checkable form of each line is the `quality` store (`quality-simplicity`,
 - Every resource is a `for_each` over a map input (label `this`); the global `tags` are
   merged with the per-resource `tags`.
 - Group memberships are separate `scaleway_iam_group_membership` resources; the group
-  ignores changes to `application_ids` and `user_ids`.
-- `enable_deletion_protection` defaults to `true`; `require_api_key_expiration` defaults to `false`.
-- Unit tests live in `tests/main.tftest.hcl` (mock provider); the `check` block is in `main.tf`.
+  declares `external_membership = true` and never sets `application_ids` or `user_ids`.
+- `enable_deletion_protection` and `require_api_key_secret_id` default to `true`; `require_api_key_expiration` defaults to `false`.
+- Unit tests live in `tests/main.tftest.hcl` (mock provider); the module has no `check` block (policy principals are validated on the variable).
 
 ## Standards lookup
 Engineering standards are OpenSpec specs in the stores listed under `references:`

@@ -4,8 +4,8 @@
 # ║  This example demonstrates all features of the Scaleway IAM module:           ║
 # ║  - Applications (service accounts)                                            ║
 # ║  - API Keys with expiration and Secret Manager secret storage                 ║
-# ║  - Groups with memberships                                                     ║
-# ║  - Policies with organization and project-level rules                         ║
+# ║  - Groups with memberships (applications and module users)                    ║
+# ║  - Policies with organization and project-level rules and conditions          ║
 # ║  - Users with invitation settings                                             ║
 # ║  - SSH Keys                                                                    ║
 # ╚══════════════════════════════════════════════════════════════════════════════╝
@@ -19,19 +19,9 @@ variable "organization_id" {
   type        = string
 }
 
-variable "project_name" {
-  description = "Your Scaleway Project name"
+variable "project_id" {
+  description = "Your Scaleway Project ID"
   type        = string
-}
-
-# ==============================================================================
-# Data Sources
-# ==============================================================================
-# Look up the project to get the project_id for policy rules
-
-data "scaleway_account_project" "this" {
-  name            = var.project_name
-  organization_id = var.organization_id
 }
 
 # ==============================================================================
@@ -47,7 +37,7 @@ data "scaleway_account_project" "this" {
 
 resource "scaleway_secret" "terraform_key" {
   name       = "iam-terraform-api-key"
-  project_id = data.scaleway_account_project.this.id
+  project_id = var.project_id
 }
 
 # ==============================================================================
@@ -58,7 +48,9 @@ module "iam" {
   source = "../.."
 
   organization_id = var.organization_id
-  project_name    = var.project_name
+
+  # Default project of the SSH keys and API keys that set none
+  project_id = var.project_id
 
   # Global tags applied to all resources
   # Note: Scaleway tags cannot contain colons, use = or _ instead
@@ -75,6 +67,12 @@ module "iam" {
 
   enable_deletion_protection = false # Prevent accidental deletion
   require_api_key_expiration = false # Set to true in production
+
+  # Explicit opt-out of the secure default (true): keys without secret_id are
+  # accepted and their secret key lands in the state (read it from the
+  # sensitive api_key_secret_keys output). Remove this line in production and
+  # give every key a secret_id.
+  require_api_key_secret_id = false
 
   # ---------------------------------------------------------------------------
   # Applications (Service Accounts)
@@ -114,32 +112,31 @@ module "iam" {
 
   api_keys = {
     terraform_key = {
-      application_key    = "terraform"
-      description        = "Terraform automation API key"
-      default_project_id = data.scaleway_account_project.this.id
+      application_key = "terraform"
+      description     = "Terraform automation API key"
       # The secret key goes to Secret Manager and never reaches the state
       secret_id = scaleway_secret.terraform_key.id
       # No expiration for long-running automation
     }
 
+    # The keys below set no default_project_id: it falls back to project_id,
+    # and they have no secret_id (allowed by the opt-out above).
     gitlab_ci_key = {
-      application_key    = "gitlab_ci"
-      description        = "GitLab CI deployment key"
-      default_project_id = data.scaleway_account_project.this.id
-      expires_at         = "2026-12-31T23:59:59Z"
+      application_key = "gitlab_ci"
+      description     = "GitLab CI deployment key"
+      expires_at      = "2027-12-31T23:59:59Z"
     }
 
     monitoring_key = {
-      application_key    = "monitoring"
-      description        = "Monitoring service read-only key"
-      default_project_id = data.scaleway_account_project.this.id
-      expires_at         = "2026-06-30T23:59:59Z"
+      application_key = "monitoring"
+      description     = "Monitoring service read-only key"
+      expires_at      = "2027-06-30T23:59:59Z"
     }
 
     backup_key = {
       application_key = "backup"
       description     = "Backup service API key"
-      expires_at      = "2026-12-31T23:59:59Z"
+      expires_at      = "2027-12-31T23:59:59Z"
     }
   }
 
@@ -154,6 +151,8 @@ module "iam" {
       description      = "Full administrative access to all resources"
       tags             = ["admin", "privileged"]
       application_keys = ["terraform"]
+      # A user invited by this module, added to the group in the same apply
+      user_keys = ["admin"]
     }
 
     developers = {
@@ -181,26 +180,29 @@ module "iam" {
   # ---------------------------------------------------------------------------
   # Policies
   # ---------------------------------------------------------------------------
-  # Define access permissions for groups
+  # Define access permissions. A policy has exactly one principal: group_key,
+  # application_key, user_id or no_principal = true.
 
   policies = {
     admin_full_access = {
       name        = "admin-full-access"
       description = "Full administrative access to all organization resources"
-      group_keys  = ["admins"]
+      group_key   = "admins"
       tags        = ["admin", "full-access"]
       rules = [
         {
           permission_set_names = ["AllProductsFullAccess"]
-          organization_id      = var.organization_id
+          organization_wide    = true
         }
       ]
     }
 
+    # One rule per scope: organization-wide and project-level permission sets
+    # cannot share a rule
     developer_project_access = {
       name        = "developer-project-access"
       description = "Developer access to specific projects"
-      group_keys  = ["developers"]
+      group_key   = "developers"
       tags        = ["developer", "project-access"]
       rules = [
         {
@@ -210,33 +212,41 @@ module "iam" {
             "ObjectStorageFullAccess",
             "RelationalDatabasesFullAccess"
           ]
-          project_ids = [data.scaleway_account_project.this.id]
+          project_ids = [var.project_id]
+        },
+        {
+          permission_set_names = ["IAMReadOnly"]
+          organization_wide    = true
         }
       ]
     }
 
+    # A rule condition (CEL expression) restricts when the rule applies, here
+    # to an IP allow-list (documentation range: replace it with your own)
     readonly_organization = {
       name        = "readonly-organization"
       description = "Read-only access to organization resources"
-      group_keys  = ["readonly"]
+      group_key   = "readonly"
       tags        = ["readonly"]
       rules = [
         {
           permission_set_names = ["AllProductsReadOnly"]
-          organization_id      = var.organization_id
+          organization_wide    = true
+          condition            = "request.ip in ['203.0.113.0/24']"
         }
       ]
     }
 
+    # Attached to an application directly instead of a group
     backup_access = {
-      name        = "backup-storage-access"
-      description = "Access for backup operations on Object Storage"
-      group_keys  = ["backup_operators"]
-      tags        = ["backup", "storage"]
+      name            = "backup-storage-access"
+      description     = "Access for backup operations on Object Storage"
+      application_key = "backup"
+      tags            = ["backup", "storage"]
       rules = [
         {
           permission_set_names = ["ObjectStorageFullAccess"]
-          project_ids          = [data.scaleway_account_project.this.id]
+          project_ids          = [var.project_id]
         }
       ]
     }
