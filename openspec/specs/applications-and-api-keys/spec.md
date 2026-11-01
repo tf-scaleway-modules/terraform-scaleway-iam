@@ -17,7 +17,7 @@ IAM applications and the API keys bound to an application or a user, with option
 - **THEN** the plan fails with "Application names must start with a letter and contain only alphanumeric characters, hyphens, and underscores (max 63 chars)."
 
 ### Requirement: API keys
-`api_keys` SHALL be a map of objects with the optional attributes `application_key`, `user_id`, `description` (default `""`), `expires_at`, `default_project_id` and `secret_id`. The module SHALL create one `scaleway_iam_api_key` per key, owned by the application created under `application_key` of `applications` when that is set, or by the user `user_id` when that is set. `description`, `expires_at`, `default_project_id` and `secret_id` (`null` when unset) SHALL be passed to the resource.
+`api_keys` SHALL be a map of objects with the optional attributes `application_key`, `user_id`, `description` (default `""`), `expires_at`, `default_project_id` and `secret_id`. The module SHALL create one `scaleway_iam_api_key` per key, owned by the application under `application_key` when set, or by the user `user_id` when set. `default_project_id` SHALL default to `project_id`; the other attributes are passed as is (`null` when unset).
 
 #### Scenario: Key for an application
 - **WHEN** `applications = { terraform = {...} }` and `api_keys = { k = { application_key = "terraform" } }`
@@ -32,11 +32,19 @@ IAM applications and the API keys bound to an application or a user, with option
 - **THEN** the API key `k` is planned with that `secret_id` and the module plans no secret resource
 
 #### Scenario: Key without secret
-- **WHEN** a key does not set `secret_id`
-- **THEN** the API key is planned with `secret_id` null and its plan is unchanged from the previous release
+- **WHEN** a key does not set `secret_id` and `require_api_key_secret_id = false`
+- **THEN** the API key is planned with `secret_id` null
+
+#### Scenario: Default project follows the module
+- **WHEN** `project_id = "<uuid>"` and a key sets no `default_project_id`
+- **THEN** the API key is planned with that `default_project_id`; a key that sets its own keeps it
+
+#### Scenario: No project anywhere
+- **WHEN** `project_id` is `null` and a key sets no `default_project_id`
+- **THEN** the API key is planned with `default_project_id` null
 
 ### Requirement: API key owner and format validation
-Each API key MUST set exactly one of `application_key` and `user_id`. `application_key`, when set, MUST be a key of `applications`. `user_id` and `default_project_id`, when set, MUST be lowercase UUIDs. `secret_id`, when set, MUST be a lowercase UUID or a regional ID (`<region>/<uuid>`). `expires_at`, when set, MUST match `YYYY-MM-DDTHH:MM:SSZ`.
+Each API key MUST set exactly one of `application_key` and `user_id`. `application_key`, when set, MUST be a key of `applications`. `user_id` and `default_project_id`, when set, MUST be lowercase UUIDs. `secret_id`, when set, MUST be a lowercase UUID or a regional ID (`<region>/<uuid>`). `expires_at`, when set, MUST match `YYYY-MM-DDTHH:MM:SSZ` and be a real date.
 
 #### Scenario: Both owners
 - **WHEN** a key sets `application_key = "terraform"` and `user_id = "<uuid>"`
@@ -70,6 +78,10 @@ Each API key MUST set exactly one of `application_key` and `user_id`. `applicati
 - **WHEN** `expires_at = "2026-12-31"`
 - **THEN** the plan fails with "expires_at must be in ISO 8601 format (YYYY-MM-DDTHH:MM:SSZ)."
 
+#### Scenario: Impossible date
+- **WHEN** `expires_at = "2026-13-45T00:00:00Z"`
+- **THEN** the plan fails with the same validation error
+
 ### Requirement: Mandatory API key expiration
 When `require_api_key_expiration` is `true`, every API key SHALL set `expires_at`; a key without it MUST fail the plan through a `precondition` on the API key resource naming the key, and the variable description SHALL say so. When `false` (default), keys without `expires_at` SHALL be accepted.
 
@@ -86,29 +98,29 @@ When `require_api_key_expiration` is `true`, every API key SHALL set `expires_at
 - **THEN** the plan succeeds and the key appears in `security_audit.api_keys_without_expiration`
 
 ### Requirement: API key outputs
-The `api_keys` output SHALL be sensitive and expose, per key, `id`, `access_key`, `secret_key`, `description`, `created_at` and `expires_at`. `secret_key` SHALL be `null` for a key that sets `secret_id`, because the secret is stored in Secret Manager and not in state; the output description SHALL say so and how to read it. `api_key_access_keys` SHALL map each key to its access key and `api_key_ids` to its ID; neither exposes the secret key.
+The non-sensitive `api_keys` output SHALL expose per key `id`, `access_key`, `description`, `created_at` and `expires_at`, never the secret key. The sensitive `api_key_secret_keys` output SHALL map the keys of API keys WITHOUT `secret_id` to their secret key; a key with `secret_id` is absent and its secret is read from Secret Manager. The descriptions SHALL say so.
 
 #### Scenario: Reading credentials
 - **WHEN** an API key `k` without `secret_id` is created
-- **THEN** `api_key_access_keys["k"]` is its access key, and `api_keys["k"].secret_key` is its secret key through the sensitive output
+- **THEN** `api_keys["k"].access_key` is its access key and `api_key_secret_keys["k"]` its secret key
 
 #### Scenario: Secret stored in Secret Manager
 - **WHEN** an API key `k` sets `secret_id`
-- **THEN** `api_keys["k"].secret_key` is `null` and the value is read from the secret's latest version
+- **THEN** `api_key_secret_keys` has no `k` entry and the value is read from the secret's latest version
 
 #### Scenario: No API keys
 - **WHEN** `api_keys = {}`
-- **THEN** `api_keys`, `api_key_access_keys` and `api_key_ids` are empty maps
+- **THEN** `api_keys` and `api_key_secret_keys` are empty maps
 
 ### Requirement: Mandatory API key secret storage
-`require_api_key_secret_id` (`bool`, default `false`) SHALL, when `true`, make every API key set `secret_id`; a key without it MUST fail the plan through a `precondition` on the API key resource naming the key, and the variable description SHALL say so. When `false`, keys without `secret_id` SHALL be accepted.
+`require_api_key_secret_id` (`bool`, default `true`) SHALL make every API key set `secret_id`; a key without it MUST fail the plan through a `precondition` on the API key resource naming the key, and the variable description SHALL say so. When `false`, keys without `secret_id` SHALL be accepted and their secret key lands in state.
 
 #### Scenario: Secret storage required and missing
-- **WHEN** `require_api_key_secret_id = true` and key `ci` has no `secret_id`
+- **WHEN** `require_api_key_secret_id` is not set and key `ci` has no `secret_id`
 - **THEN** the plan fails with "API key 'ci' must set secret_id when require_api_key_secret_id is enabled."
 
 #### Scenario: Secret storage required and present
-- **WHEN** `require_api_key_secret_id = true` and every key has a valid `secret_id`
+- **WHEN** every key has a valid `secret_id`
 - **THEN** the plan succeeds
 
 #### Scenario: Secret storage not required

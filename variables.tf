@@ -29,26 +29,25 @@ variable "organization_id" {
   }
 }
 
-variable "project_name" {
+variable "project_id" {
   description = <<-EOT
-    Scaleway Project name where project-scoped resources will be created.
+    Scaleway Project ID used by the project-scoped settings of the module.
 
-    Projects provide logical isolation within an organization.
-    SSH keys and some resources are created at project level.
+    IAM resources are organization-scoped; only two settings depend on a
+    project: the project of an SSH key (ssh_keys[*].project_id) and the default
+    project of an API key (api_keys[*].default_project_id). Each falls back to
+    this value when it is not set on the entry.
 
-    Set to null if you only want to manage organization-level IAM resources.
+    When null, the provider default project applies.
 
-    Naming rules:
-    - Must start with a lowercase letter
-    - Can contain lowercase letters, numbers, and hyphens
-    - Must be 2-63 characters long
+    Format: UUID (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)
   EOT
   type        = string
   default     = null
 
   validation {
-    condition     = var.project_name == null || can(regex("^[a-z][a-z0-9-]{0,61}[a-z0-9]$", var.project_name))
-    error_message = "Project name must be lowercase alphanumeric with hyphens, start with a letter, and be 2-63 characters."
+    condition     = var.project_id == null || can(regex("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", var.project_id))
+    error_message = "project_id must be a valid UUID format."
   }
 }
 
@@ -127,14 +126,16 @@ variable "require_api_key_secret_id" {
   description = <<-EOT
     Require all API keys to store their secret key in Secret Manager.
 
-    When enabled, the plan fails (resource precondition on the API key) if any
-    API key is configured without a secret_id, so no API key secret lands in
-    the Terraform state.
+    When enabled (default), the plan fails (resource precondition on the API
+    key) if any API key is configured without a secret_id, so no API key secret
+    lands in the Terraform state. Set secret_id on the key (this REPLACES an
+    existing key without one: treat it as a rotation) or opt out explicitly
+    with false, in which case the secret key of such keys is stored in the
+    state and exposed by the sensitive api_key_secret_keys output.
   EOT
   type        = bool
-  default     = false
+  default     = true
 }
-
 
 # ==============================================================================
 # IAM Applications
@@ -211,15 +212,17 @@ variable "api_keys" {
     - application_key: Key of an application defined in var.applications
     - user_id: UUID of an existing IAM user
 
-    The default_project_id can be used to set a default project context
-    for API calls made with this key.
-
+    - default_project_id: default project context of the key; falls back to
+      var.project_id when not set.
+    - expires_at: expiration date, UTC, in the form YYYY-MM-DDTHH:MM:SSZ.
     - secret_id: ID of an existing Secret Manager secret (UUID or
       <region>/<uuid>) that receives the secret key as a new secret version.
       The secret key is then kept out of the state and the module outputs
-      (api_keys[*].secret_key is null). The module does not create or manage
-      the secret. Changing secret_id on an existing key REPLACES the key (new
-      access key and secret key), treat it as a rotation.
+      (it is absent from api_key_secret_keys). The module does not create or
+      manage the secret. Required for every key while
+      require_api_key_secret_id is true (default). Changing secret_id on an
+      existing key REPLACES the key (new access key and secret key), treat it
+      as a rotation.
 
     Example:
     ```hcl
@@ -290,7 +293,7 @@ variable "api_keys" {
   validation {
     condition = alltrue([
       for k, v in var.api_keys :
-      v.expires_at == null || can(regex("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$", v.expires_at))
+      v.expires_at == null || (can(regex("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$", v.expires_at)) && can(timecmp(v.expires_at, v.expires_at)))
     ])
     error_message = "expires_at must be in ISO 8601 format (YYYY-MM-DDTHH:MM:SSZ)."
   }
@@ -322,6 +325,17 @@ variable "groups" {
 
     Best practice: Organize groups by role or function rather than by team.
 
+    Members, all optional:
+    - application_keys: keys of var.applications
+    - user_keys: keys of var.users (users invited by this module, added in the
+      same apply)
+    - user_ids: IDs of existing users
+
+    The module declares external membership to the provider on every group and
+    manages members only through these lists. A group with empty lists gets no
+    member from the module, so members added elsewhere (console, other
+    configuration) are left alone.
+
     Example:
     ```hcl
     groups = {
@@ -329,31 +343,26 @@ variable "groups" {
         name        = "organization-admins"
         description = "Full administrative access"
         tags        = ["admin", "privileged"]
-        external_membership = false
       }
       developers = {
-        name        = "developers"
-        description = "Development team access"
+        name             = "developers"
+        description      = "Development team access"
         application_keys = ["cicd"]
+        user_keys        = ["alice"]
         user_ids = [
           "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
         ]
-      }
-      readonly = {
-        name        = "read-only-users"
-        description = "Read-only access for monitoring"
-        external_membership = true  # Membership managed outside this module
       }
     }
     ```
   EOT
   type = map(object({
-    name                = string
-    description         = optional(string, "")
-    tags                = optional(list(string), [])
-    application_keys    = optional(list(string), [])
-    user_ids            = optional(list(string), [])
-    external_membership = optional(bool, false)
+    name             = string
+    description      = optional(string, "")
+    tags             = optional(list(string), [])
+    application_keys = optional(list(string), [])
+    user_keys        = optional(list(string), [])
+    user_ids         = optional(list(string), [])
   }))
   default = {}
 
@@ -376,18 +385,27 @@ variable "groups" {
 
   validation {
     condition = alltrue([
-      for k, v in var.groups : v.external_membership || alltrue([
+      for k, v in var.groups : alltrue([
         for app_key in v.application_keys : contains(keys(var.applications), app_key)
       ])
     ])
     error_message = "Group application_keys must be keys of the applications input."
   }
 
+  validation {
+    condition = alltrue([
+      for k, v in var.groups : alltrue([
+        for user_key in v.user_keys : contains(keys(var.users), user_key)
+      ])
+    ])
+    error_message = "Group user_keys must be keys of the users input."
+  }
+
   # Membership keys use the first 8 characters of the user ID
   validation {
     condition = alltrue([
       for k, v in var.groups :
-      v.external_membership || length(distinct([for user_id in v.user_ids : substr(user_id, 0, 8)])) == length(v.user_ids)
+      length(distinct([for user_id in v.user_ids : substr(user_id, 0, 8)])) == length(v.user_ids)
     ])
     error_message = "user_ids of one group must be unique and must not share their first 8 characters (membership keys are derived from them)."
   }
@@ -411,8 +429,12 @@ variable "policies" {
     Policies grant permissions to users, groups, or applications through rules.
     Each rule specifies:
     - permission_set_names: List of predefined permission sets to grant
-    - organization_id: For organization-wide permissions (optional)
+    - organization_wide: true for organization-wide permissions (the module
+      passes organization_id); exclusive with project_ids
     - project_ids: For project-specific permissions (optional)
+    - condition: CEL expression restricting when the rule applies (optional),
+      passed unchanged to the rule, for example an IP allow-list:
+      "request.ip in ['203.0.113.0/24']"
 
     A policy can have multiple rules for different scopes.
 
@@ -420,10 +442,9 @@ variable "policies" {
     project): the provider (2.89.0 and later) rejects a rule that mixes them
     at plan time. Split such a rule into two rules.
 
-    A policy has a single principal (or none with no_principal = true): the
-    first entry of user_ids, otherwise of group_keys, otherwise of
-    application_keys. Other entries are ignored and reported by the
-    policy_single_principal check.
+    A policy has exactly one principal: user_id (existing user), group_key (key
+    of var.groups), application_key (key of var.applications) or
+    no_principal = true for a reusable template.
 
     Common permission sets:
     - AllProductsFullAccess: Full access to all products
@@ -439,18 +460,19 @@ variable "policies" {
       admin_policy = {
         name        = "admin-full-access"
         description = "Full administrative access"
-        group_keys  = ["admins"]
+        group_key   = "admins"
         rules = [
           {
             permission_set_names = ["AllProductsFullAccess"]
-            organization_id      = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+            organization_wide    = true
+            condition            = "request.ip in ['203.0.113.0/24']"
           }
         ]
       }
       dev_policy = {
         name        = "developer-access"
         description = "Developer project access"
-        group_keys  = ["developers"]
+        group_key   = "developers"
         rules = [
           {
             permission_set_names = ["InstancesFullAccess", "ObjectStorageFullAccess"]
@@ -464,17 +486,18 @@ variable "policies" {
     ```
   EOT
   type = map(object({
-    name             = string
-    description      = optional(string, "")
-    tags             = optional(list(string), [])
-    no_principal     = optional(bool, false)
-    user_ids         = optional(list(string), [])
-    group_keys       = optional(list(string), [])
-    application_keys = optional(list(string), [])
+    name            = string
+    description     = optional(string, "")
+    tags            = optional(list(string), [])
+    no_principal    = optional(bool, false)
+    user_id         = optional(string)
+    group_key       = optional(string)
+    application_key = optional(string)
     rules = list(object({
       permission_set_names = list(string)
-      organization_id      = optional(string)
+      organization_wide    = optional(bool, false)
       project_ids          = optional(list(string), [])
+      condition            = optional(string)
     }))
   }))
   default = {}
@@ -504,33 +527,43 @@ variable "policies" {
 
   validation {
     condition = alltrue([
+      for k, v in var.policies :
+      length(compact([v.user_id, v.group_key, v.application_key])) + (v.no_principal ? 1 : 0) == 1
+    ])
+    error_message = "Each policy must set exactly one of user_id, group_key, application_key or no_principal = true."
+  }
+
+  validation {
+    condition = alltrue([
+      for k, v in var.policies :
+      v.user_id == null || can(regex("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", v.user_id))
+    ])
+    error_message = "user_id must be a valid UUID format."
+  }
+
+  validation {
+    condition = alltrue([
+      for k, v in var.policies :
+      v.group_key == null || contains(keys(var.groups), v.group_key)
+    ])
+    error_message = "group_key must be a key of the groups input."
+  }
+
+  validation {
+    condition = alltrue([
+      for k, v in var.policies :
+      v.application_key == null || contains(keys(var.applications), v.application_key)
+    ])
+    error_message = "application_key must be a key of the applications input."
+  }
+
+  validation {
+    condition = alltrue([
       for k, v in var.policies : alltrue([
-        for user_id in v.user_ids :
-        can(regex("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", user_id))
+        for rule in v.rules : !rule.organization_wide || length(rule.project_ids) == 0
       ])
     ])
-    error_message = "All user_ids must be valid UUID format."
-  }
-
-  # Only the entry that selects the principal is used, so only it is checked
-  validation {
-    condition = alltrue([
-      for k, v in var.policies :
-      v.no_principal || length(v.user_ids) > 0 || length(v.group_keys) == 0
-      ? true
-      : contains(keys(var.groups), v.group_keys[0])
-    ])
-    error_message = "The group_keys entry that selects a policy principal must be a key of the groups input."
-  }
-
-  validation {
-    condition = alltrue([
-      for k, v in var.policies :
-      v.no_principal || length(v.user_ids) > 0 || length(v.group_keys) > 0 || length(v.application_keys) == 0
-      ? true
-      : contains(keys(var.applications), v.application_keys[0])
-    ])
-    error_message = "The application_keys entry that selects a policy principal must be a key of the applications input."
+    error_message = "A rule must not set both organization_wide and project_ids."
   }
 }
 
@@ -548,7 +581,8 @@ variable "users" {
     IMPORTANT: Creating a user sends an invitation email to the specified address.
     The user must accept the invitation to complete account setup.
 
-    Users can be added to groups and policies after creation.
+    Users can be added to groups in the same apply through the groups
+    user_keys, and receive policies through their groups.
     For automated/programmatic access, prefer applications over users.
 
     Example:
@@ -607,10 +641,8 @@ variable "ssh_keys" {
     SSH keys provide secure access to Scaleway Instances and other resources
     that support SSH authentication.
 
-    Keys are associated with the project specified in var.project_name.
-    If project_id is specified in the key configuration, it overrides
-    the default project. When project_name is null, every key must set
-    project_id.
+    Keys are created in the project given by their own project_id, otherwise
+    in var.project_id, otherwise in the provider default project.
 
     You can provide the public key directly or use file() function
     to read from a file.
@@ -662,9 +694,9 @@ variable "ssh_keys" {
 
   validation {
     condition = alltrue([
-      for k, v in var.ssh_keys : can(regex("^ssh-(rsa|ed25519|ecdsa)\\s+[A-Za-z0-9+/=]+", v.public_key))
+      for k, v in var.ssh_keys : can(regex("^(ssh-rsa|ssh-ed25519|ecdsa-sha2-nistp(256|384|521))\\s+[A-Za-z0-9+/=]+", v.public_key))
     ])
-    error_message = "Public keys must be valid SSH public key format (ssh-rsa, ssh-ed25519, or ssh-ecdsa)."
+    error_message = "Public keys must be valid SSH public key format (ssh-rsa, ssh-ed25519 or ecdsa-sha2-nistp256/384/521)."
   }
 
   validation {
@@ -673,10 +705,5 @@ variable "ssh_keys" {
       v.project_id == null || can(regex("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", v.project_id))
     ])
     error_message = "project_id must be a valid UUID format."
-  }
-
-  validation {
-    condition     = var.project_name != null || alltrue([for k, v in var.ssh_keys : v.project_id != null])
-    error_message = "Each SSH key needs a project_id when project_name is not set."
   }
 }

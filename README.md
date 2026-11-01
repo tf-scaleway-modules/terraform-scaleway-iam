@@ -41,7 +41,7 @@ module "iam" {
   source = "path/to/scaleway-iam"
 
   organization_id = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-  project_name    = "my-project"
+  project_id      = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
 
   # Create a Terraform automation application with API key
   applications = {
@@ -51,22 +51,19 @@ module "iam" {
     }
   }
 
+  # Every key needs a Secret Manager secret by default (require_api_key_secret_id)
   api_keys = {
     terraform_key = {
       application_key = "terraform"
       description     = "Terraform API key"
+      secret_id       = "fr-par/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
     }
   }
 }
 
-# Access the generated credentials
+# The access key is public; the secret key is read from the secret
 output "access_key" {
-  value = module.iam.api_key_access_keys["terraform_key"]
-}
-
-output "secret_key" {
-  value     = module.iam.api_keys["terraform_key"].secret_key
-  sensitive = true
+  value = module.iam.api_keys["terraform_key"].access_key
 }
 ```
 
@@ -79,7 +76,7 @@ module "iam" {
   source = "path/to/scaleway-iam"
 
   organization_id = var.organization_id
-  project_name    = var.project_name
+  project_id      = var.project_id
 
   tags = ["environment=production", "managed-by=terraform"]
 
@@ -100,14 +97,15 @@ module "iam" {
   # API Keys
   api_keys = {
     terraform_key = {
-      application_key    = "terraform"
-      description        = "Terraform key"
-      default_project_id = var.project_id
+      application_key = "terraform"
+      description     = "Terraform key"
+      secret_id       = var.terraform_secret_id # default_project_id falls back to project_id
     }
     cicd_key = {
       application_key = "cicd"
       description     = "CI/CD key"
-      expires_at      = "2026-12-31T23:59:59Z"
+      expires_at      = "2027-12-31T23:59:59Z"
+      secret_id       = var.cicd_secret_id
     }
   }
 
@@ -128,16 +126,17 @@ module "iam" {
   # Policies
   policies = {
     admin_policy = {
-      name       = "admin-full-access"
-      group_keys = ["admins"]
+      name      = "admin-full-access"
+      group_key = "admins"
       rules = [{
         permission_set_names = ["AllProductsFullAccess"]
-        organization_id      = var.organization_id
+        organization_wide    = true
+        condition            = "request.ip in ['203.0.113.0/24']" # optional CEL condition
       }]
     }
     dev_policy = {
-      name       = "developer-access"
-      group_keys = ["developers"]
+      name      = "developer-access"
+      group_key = "developers"
       rules = [{
         permission_set_names = ["InstancesFullAccess", "ObjectStorageFullAccess"]
         project_ids          = [var.project_id]
@@ -182,12 +181,15 @@ module "iam" {
 
   groups = {
     admins = {
-      name     = "admins"
-      user_ids = [] # Add user IDs after they accept invitations
+      name      = "admins"
+      user_keys = ["admin"]                                  # user invited above, added in the same apply
+      user_ids  = ["xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"] # existing users, by ID
     }
   }
 }
 ```
+
+The module declares external membership on every group and manages members only through `application_keys`, `user_keys` and `user_ids`. A group with empty lists gets no member from the module, so members added elsewhere are left alone.
 
 ## Architecture
 
@@ -239,6 +241,8 @@ module "iam" {
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
+Group members come only from `application_keys`, `user_keys` and `user_ids` (separate membership resources); every group declares external membership to the provider, so the group resource never reads or writes members. The project (`project_id`) only matters for SSH keys and the default project of API keys.
+
 ## Common Permission Sets
 
 | Permission Set | Description |
@@ -266,11 +270,13 @@ See [Scaleway IAM Documentation](https://www.scaleway.com/en/docs/identity-and-a
 2. **Set Expiration**: Always set `expires_at` for time-limited access
 3. **Minimal Permissions**: Grant only required permission sets
 4. **Rotate Regularly**: Implement key rotation policies
-5. **Secure Storage**: Set `secret_id` so the secret key goes to Secret Manager instead of the state
+5. **Secure Storage**: `secret_id` is required by default (`require_api_key_secret_id = true`) so the secret key goes to Secret Manager instead of the state
 
 #### Keeping secret keys out of state
 
-Set `secret_id` on an API key to the ID of an existing Secret Manager secret (UUID or `<region>/<uuid>`). The provider stores the secret key as a new secret version, and `api_keys[*].secret_key` is `null`: the secret key is in neither the state nor any output. The module does not create the secret (for example use the `scaleway-secrets-and-keys` module).
+Set `secret_id` on an API key to the ID of an existing Secret Manager secret (UUID or `<region>/<uuid>`). The provider stores the secret key as a new secret version: the secret key is in neither the state nor any output. The module does not create the secret (for example use the `scaleway-secrets-and-keys` module).
+
+The `api_keys` output is not sensitive and never holds a secret key. The sensitive `api_key_secret_keys` output holds the secret key of the keys WITHOUT `secret_id` only (they are stored in state).
 
 ```hcl
 api_keys = {
@@ -282,7 +288,7 @@ api_keys = {
 ```
 
 - Read the secret key from the secret, for example with the `scaleway_secret_version` ephemeral resource or data source.
-- Set `require_api_key_secret_id = true` to fail the plan for any key without `secret_id`; `security_audit.api_keys_secret_in_state` lists the keys that still store it in state.
+- `require_api_key_secret_id` defaults to `true`: the plan fails for any key without `secret_id`. Set it to `false` to opt out explicitly; `security_audit.api_keys_secret_in_state` then lists the keys that still store their secret key in state.
 - Adding or changing `secret_id` on an existing key **replaces the key** (new access key and secret key). Treat it as a rotation and adopt it key by key.
 - The identity running Terraform needs `SecretManagerEditor` on the secret's project.
 
@@ -294,9 +300,10 @@ See [SECURITY.md](./SECURITY.md) for what lands in state.
 2. **Least Privilege**: Start with minimal permissions and add as needed
 3. **Project Scope**: Prefer project-scoped rules over organization-wide
 4. **Regular Audits**: Review policies and memberships periodically
-5. **One Principal**: A policy has a single principal: the first entry of `user_ids`, otherwise of `group_keys`, otherwise of `application_keys` (none with `no_principal = true`). Other entries are ignored and reported by the `policy_single_principal` check warning
-
+5. **One Principal**: A policy has exactly one of `user_id`, `group_key`, `application_key` or `no_principal = true`; the plan fails otherwise
 6. **Single-Scope Rules**: All `permission_set_names` of one rule must share a scope (organization or project). The provider (2.89.0 and later) rejects a mixed rule at plan time: split it into two rules
+7. **Rule Scope**: `organization_wide = true` or `project_ids`, never both. A rule with neither is left to the Scaleway API
+8. **Conditions**: a rule may carry a `condition` (CEL expression, for example an IP allow-list `request.ip in ['203.0.113.0/24']`), passed unchanged
 
 ### Deletion Protection
 
@@ -313,7 +320,7 @@ tofu state rm 'module.iam.terraform_data.application_deletion_protection["ci"]'
 
 ### SSH Key Security
 
-1. **Ed25519 Preferred**: Use Ed25519 keys for better security
+1. **Ed25519 Preferred**: Use Ed25519 keys for better security (`ssh-rsa`, `ssh-ed25519` and `ecdsa-sha2-nistp256/384/521` are accepted); a key without `project_id` uses the module `project_id`
 2. **Disable Unused**: Set `disabled = true` for emergency/backup keys
 3. **Remove Promptly**: Delete keys when no longer needed
 
@@ -329,7 +336,38 @@ tofu state rm 'module.iam.terraform_data.application_deletion_protection["ci"]'
 
 ## Upgrade Notes
 
-### Major release: provider `~> 2.89`
+### Upgrading from v2 to v3
+
+v3.0.0 is a major release (provider `~> 2.89` and `required_version >= 1.10.7` are unchanged). Pin `?ref=v3.0.0`, apply the edits below, then run `tofu plan`.
+
+| # | Breaking change | Your edit |
+|---|-----------------|-----------|
+| 1 | `project_name` removed, `project_id` added (UUID, default `null` = provider default project); output `project_id` removed | Replace `project_name = "x"` by `project_id = "<uuid>"` (read it with a `scaleway_account_project` data source in your configuration) |
+| 2 | `ssh_keys[*].project_id` and `api_keys[*].default_project_id` fall back to `project_id` | None for SSH keys. API keys without `default_project_id` get `project_id` as default project (in-place update): set `default_project_id` explicitly or leave `project_id` unset to keep the current value |
+| 3 | An SSH key no longer needs a `project_id` when no project is set | None (the key goes to the provider default project) |
+| 4 | `policies[*].user_ids`, `group_keys`, `application_keys` (lists) become `user_id`, `group_key`, `application_key` (strings); exactly one, or `no_principal = true` | `group_keys = ["a"]` becomes `group_key = "a"` (same for the others); drop surplus entries |
+| 5 | `policies[*].rules[*].organization_id` becomes `organization_wide` (bool); exclusive with `project_ids` | `organization_id = var.organization_id` becomes `organization_wide = true` |
+| 6 | Check `policy_single_principal` removed (the validation of 4 rejects what it warned about) | None |
+| 7 | `groups[*].external_membership` removed; every group declares external membership to the provider | Delete the attribute. A group that had `external_membership = true` with non-empty `application_keys` or `user_ids` now creates those memberships: empty the lists to keep membership managed elsewhere |
+| 8 | `api_keys` output is no longer sensitive and has no `secret_key`; secret keys move to the sensitive `api_key_secret_keys` (keys without `secret_id` only) | `module.iam.api_keys["k"].secret_key` becomes `module.iam.api_key_secret_keys["k"]` |
+| 9 | Outputs removed: `project_id`, `summary`, `api_key_access_keys`, `api_key_ids`, `ssh_key_ids`, `ssh_key_fingerprints`, `ssh_key_public_keys` | Use `api_keys["k"].access_key` / `.id`, `ssh_keys["k"].id` / `.fingerprint`, `length()` of the maps; the public key is your own input |
+| 10 | `security_audit.api_keys_expiring_soon` renamed `api_keys_with_expiration` | Rename the reference |
+| 11 | `require_api_key_secret_id` defaults to `true` | Set `secret_id` on every key (this REPLACES the key, treat it as a rotation) or set `require_api_key_secret_id = false` to opt out |
+| 12 | `expires_at` must be a real date; `ssh-ecdsa` public keys are rejected (`ecdsa-sha2-nistp256/384/521` are accepted) | None for valid inputs |
+
+New in v3: `groups[*].user_keys` (add users invited by the module in the same apply, membership key `<group>-user-key-<key>`), `policies[*].rules[*].condition`, `mfa` and `locked` in the `users` output and `security_audit.users_without_mfa`.
+
+Expected first plan:
+
+- Without `secret_id` on every key and without the opt-out of 11, the plan **fails** (precondition naming each key) and changes nothing. Choose per key: `secret_id` or `require_api_key_secret_id = false`.
+- One in-place update per group (the `external_membership` flag). The state attributes `user_ids` and `application_ids` of the groups go to `null`; no membership is called or destroyed.
+- One in-place update per API key without `default_project_id`, only when `project_id` is set.
+- No resource address changes (no `moved` block needed); membership keys are unchanged.
+- The second plan is empty.
+
+Rollback: pin `v2.0.0` and restore the previous inputs; the groups flip back in place.
+
+### Major release: provider `~> 2.89` (v2.0.0)
 
 - The module requires `scaleway/scaleway` `~> 2.89` (was `~> 2.86`). `secret_id` needs 2.88.0; 2.89.0 is the tested version and adds the policy rule scope check. Run `tofu init -upgrade` where your lock file pins an older version.
 - Existing configurations plan no change: API keys without `secret_id` keep their current state.
@@ -375,32 +413,30 @@ No modules.
 | [terraform_data.application_deletion_protection](https://registry.terraform.io/providers/hashicorp/terraform/latest/docs/resources/data) | resource |
 | [terraform_data.group_deletion_protection](https://registry.terraform.io/providers/hashicorp/terraform/latest/docs/resources/data) | resource |
 | [terraform_data.policy_deletion_protection](https://registry.terraform.io/providers/hashicorp/terraform/latest/docs/resources/data) | resource |
-| [scaleway_account_project.project](https://registry.terraform.io/providers/scaleway/scaleway/latest/docs/data-sources/account_project) | data source |
 
 ## Inputs
 
 | Name | Description | Type | Default | Required |
 |------|-------------|------|---------|:--------:|
-| <a name="input_api_keys"></a> [api\_keys](#input\_api\_keys) | Map of IAM API keys to create.<br/><br/>API keys authenticate programmatic access to Scaleway APIs.<br/><br/>IMPORTANT: Each key must be associated with EITHER an application\_key<br/>OR a user\_id, but NOT both.<br/><br/>- application\_key: Key of an application defined in var.applications<br/>- user\_id: UUID of an existing IAM user<br/><br/>The default\_project\_id can be used to set a default project context<br/>for API calls made with this key.<br/><br/>- secret\_id: ID of an existing Secret Manager secret (UUID or<br/>  <region>/<uuid>) that receives the secret key as a new secret version.<br/>  The secret key is then kept out of the state and the module outputs<br/>  (api\_keys[*].secret\_key is null). The module does not create or manage<br/>  the secret. Changing secret\_id on an existing key REPLACES the key (new<br/>  access key and secret key), treat it as a rotation.<br/><br/>Example:<pre>hcl<br/>api_keys = {<br/>  terraform_key = {<br/>    application_key    = "terraform"  # References var.applications["terraform"]<br/>    description        = "Terraform automation key"<br/>    expires_at         = "2025-12-31T23:59:59Z"<br/>    default_project_id = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"<br/>    secret_id          = "fr-par/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"<br/>  }<br/>  user_automation = {<br/>    user_id     = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"<br/>    description = "Personal automation key for admin user"<br/>  }<br/>}</pre>SECURITY NOTES:<br/>- Set expires\_at for time-limited access<br/>- Use application keys over user keys when possible<br/>- Rotate keys regularly<br/>- Never expose keys in logs or version control | <pre>map(object({<br/>    application_key    = optional(string)<br/>    user_id            = optional(string)<br/>    description        = optional(string, "")<br/>    expires_at         = optional(string)<br/>    default_project_id = optional(string)<br/>    secret_id          = optional(string)<br/>  }))</pre> | `{}` | no |
+| <a name="input_api_keys"></a> [api\_keys](#input\_api\_keys) | Map of IAM API keys to create.<br/><br/>API keys authenticate programmatic access to Scaleway APIs.<br/><br/>IMPORTANT: Each key must be associated with EITHER an application\_key<br/>OR a user\_id, but NOT both.<br/><br/>- application\_key: Key of an application defined in var.applications<br/>- user\_id: UUID of an existing IAM user<br/><br/>- default\_project\_id: default project context of the key; falls back to<br/>  var.project\_id when not set.<br/>- expires\_at: expiration date, UTC, in the form YYYY-MM-DDTHH:MM:SSZ.<br/>- secret\_id: ID of an existing Secret Manager secret (UUID or<br/>  <region>/<uuid>) that receives the secret key as a new secret version.<br/>  The secret key is then kept out of the state and the module outputs<br/>  (it is absent from api\_key\_secret\_keys). The module does not create or<br/>  manage the secret. Required for every key while<br/>  require\_api\_key\_secret\_id is true (default). Changing secret\_id on an<br/>  existing key REPLACES the key (new access key and secret key), treat it<br/>  as a rotation.<br/><br/>Example:<pre>hcl<br/>api_keys = {<br/>  terraform_key = {<br/>    application_key    = "terraform"  # References var.applications["terraform"]<br/>    description        = "Terraform automation key"<br/>    expires_at         = "2025-12-31T23:59:59Z"<br/>    default_project_id = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"<br/>    secret_id          = "fr-par/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"<br/>  }<br/>  user_automation = {<br/>    user_id     = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"<br/>    description = "Personal automation key for admin user"<br/>  }<br/>}</pre>SECURITY NOTES:<br/>- Set expires\_at for time-limited access<br/>- Use application keys over user keys when possible<br/>- Rotate keys regularly<br/>- Never expose keys in logs or version control | <pre>map(object({<br/>    application_key    = optional(string)<br/>    user_id            = optional(string)<br/>    description        = optional(string, "")<br/>    expires_at         = optional(string)<br/>    default_project_id = optional(string)<br/>    secret_id          = optional(string)<br/>  }))</pre> | `{}` | no |
 | <a name="input_applications"></a> [applications](#input\_applications) | Map of IAM applications (service accounts) to create.<br/><br/>Applications provide identity for non-human users, enabling:<br/>- Programmatic access via API keys<br/>- Fine-grained permissions via policies<br/>- Audit trail separation from human users<br/><br/>Each application key becomes part of the resource identifier.<br/><br/>Example:<pre>hcl<br/>applications = {<br/>  terraform = {<br/>    name        = "terraform-automation"<br/>    description = "Terraform infrastructure management"<br/>    tags        = ["automation", "terraform"]<br/>  }<br/>  cicd = {<br/>    name        = "gitlab-ci"<br/>    description = "GitLab CI/CD pipeline"<br/>    tags        = ["ci", "gitlab"]<br/>  }<br/>}</pre> | <pre>map(object({<br/>    name        = string<br/>    description = optional(string, "")<br/>    tags        = optional(list(string), [])<br/>  }))</pre> | `{}` | no |
 | <a name="input_enable_deletion_protection"></a> [enable\_deletion\_protection](#input\_enable\_deletion\_protection) | Enable deletion protection for critical IAM resources.<br/><br/>When enabled, a terraform\_data guard with prevent\_destroy protects each of:<br/>- IAM Applications<br/>- IAM Groups<br/>- IAM Policies<br/><br/>Any plan that destroys a guard fails: terraform destroy, removing an entry<br/>from applications, groups or policies, and switching this flag from true to<br/>false on an existing deployment (prevent\_destroy cannot be switched off by<br/>a variable). Set it to false at creation for development environments.<br/><br/>To lift protection on an existing deployment, remove the guards from state<br/>first (this leaves the IAM resources untouched), then destroy or remove the<br/>entry:<br/>- all: terraform state rm 'module.<name>.terraform\_data.application\_deletion\_protection'<br/>  (same for group\_deletion\_protection and policy\_deletion\_protection)<br/>- one entry: terraform state rm 'module.<name>.terraform\_data.application\_deletion\_protection["<key>"]' | `bool` | `true` | no |
-| <a name="input_groups"></a> [groups](#input\_groups) | Map of IAM groups to create.<br/><br/>Groups enable collective permission management by:<br/>- Grouping related users and applications<br/>- Attaching policies to multiple identities at once<br/>- Simplifying permission audits<br/><br/>Best practice: Organize groups by role or function rather than by team.<br/><br/>Example:<pre>hcl<br/>groups = {<br/>  admins = {<br/>    name        = "organization-admins"<br/>    description = "Full administrative access"<br/>    tags        = ["admin", "privileged"]<br/>    external_membership = false<br/>  }<br/>  developers = {<br/>    name        = "developers"<br/>    description = "Development team access"<br/>    application_keys = ["cicd"]<br/>    user_ids = [<br/>      "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"<br/>    ]<br/>  }<br/>  readonly = {<br/>    name        = "read-only-users"<br/>    description = "Read-only access for monitoring"<br/>    external_membership = true  # Membership managed outside this module<br/>  }<br/>}</pre> | <pre>map(object({<br/>    name                = string<br/>    description         = optional(string, "")<br/>    tags                = optional(list(string), [])<br/>    application_keys    = optional(list(string), [])<br/>    user_ids            = optional(list(string), [])<br/>    external_membership = optional(bool, false)<br/>  }))</pre> | `{}` | no |
+| <a name="input_groups"></a> [groups](#input\_groups) | Map of IAM groups to create.<br/><br/>Groups enable collective permission management by:<br/>- Grouping related users and applications<br/>- Attaching policies to multiple identities at once<br/>- Simplifying permission audits<br/><br/>Best practice: Organize groups by role or function rather than by team.<br/><br/>Members, all optional:<br/>- application\_keys: keys of var.applications<br/>- user\_keys: keys of var.users (users invited by this module, added in the<br/>  same apply)<br/>- user\_ids: IDs of existing users<br/><br/>The module declares external membership to the provider on every group and<br/>manages members only through these lists. A group with empty lists gets no<br/>member from the module, so members added elsewhere (console, other<br/>configuration) are left alone.<br/><br/>Example:<pre>hcl<br/>groups = {<br/>  admins = {<br/>    name        = "organization-admins"<br/>    description = "Full administrative access"<br/>    tags        = ["admin", "privileged"]<br/>  }<br/>  developers = {<br/>    name             = "developers"<br/>    description      = "Development team access"<br/>    application_keys = ["cicd"]<br/>    user_keys        = ["alice"]<br/>    user_ids = [<br/>      "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"<br/>    ]<br/>  }<br/>}</pre> | <pre>map(object({<br/>    name             = string<br/>    description      = optional(string, "")<br/>    tags             = optional(list(string), [])<br/>    application_keys = optional(list(string), [])<br/>    user_keys        = optional(list(string), [])<br/>    user_ids         = optional(list(string), [])<br/>  }))</pre> | `{}` | no |
 | <a name="input_organization_id"></a> [organization\_id](#input\_organization\_id) | Scaleway Organization ID.<br/><br/>The organization is the top-level entity in Scaleway's hierarchy.<br/>Find this in the Scaleway Console under Organization Settings.<br/><br/>Format: UUID (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx) | `string` | n/a | yes |
-| <a name="input_policies"></a> [policies](#input\_policies) | Map of IAM policies to create.<br/><br/>Policies grant permissions to users, groups, or applications through rules.<br/>Each rule specifies:<br/>- permission\_set\_names: List of predefined permission sets to grant<br/>- organization\_id: For organization-wide permissions (optional)<br/>- project\_ids: For project-specific permissions (optional)<br/><br/>A policy can have multiple rules for different scopes.<br/><br/>All permission\_set\_names of one rule must share a scope (organization or<br/>project): the provider (2.89.0 and later) rejects a rule that mixes them<br/>at plan time. Split such a rule into two rules.<br/><br/>A policy has a single principal (or none with no\_principal = true): the<br/>first entry of user\_ids, otherwise of group\_keys, otherwise of<br/>application\_keys. Other entries are ignored and reported by the<br/>policy\_single\_principal check.<br/><br/>Common permission sets:<br/>- AllProductsFullAccess: Full access to all products<br/>- AllProductsReadOnly: Read-only access to all products<br/>- InstancesFullAccess: Full access to Instances<br/>- ObjectStorageFullAccess: Full access to Object Storage<br/>- IAMReadOnly: Read-only access to IAM<br/>- BillingReadOnly: Read-only access to billing<br/><br/>Example:<pre>hcl<br/>policies = {<br/>  admin_policy = {<br/>    name        = "admin-full-access"<br/>    description = "Full administrative access"<br/>    group_keys  = ["admins"]<br/>    rules = [<br/>      {<br/>        permission_set_names = ["AllProductsFullAccess"]<br/>        organization_id      = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"<br/>      }<br/>    ]<br/>  }<br/>  dev_policy = {<br/>    name        = "developer-access"<br/>    description = "Developer project access"<br/>    group_keys  = ["developers"]<br/>    rules = [<br/>      {<br/>        permission_set_names = ["InstancesFullAccess", "ObjectStorageFullAccess"]<br/>        project_ids = [<br/>          "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"<br/>        ]<br/>      }<br/>    ]<br/>  }<br/>}</pre> | <pre>map(object({<br/>    name             = string<br/>    description      = optional(string, "")<br/>    tags             = optional(list(string), [])<br/>    no_principal     = optional(bool, false)<br/>    user_ids         = optional(list(string), [])<br/>    group_keys       = optional(list(string), [])<br/>    application_keys = optional(list(string), [])<br/>    rules = list(object({<br/>      permission_set_names = list(string)<br/>      organization_id      = optional(string)<br/>      project_ids          = optional(list(string), [])<br/>    }))<br/>  }))</pre> | `{}` | no |
-| <a name="input_project_name"></a> [project\_name](#input\_project\_name) | Scaleway Project name where project-scoped resources will be created.<br/><br/>Projects provide logical isolation within an organization.<br/>SSH keys and some resources are created at project level.<br/><br/>Set to null if you only want to manage organization-level IAM resources.<br/><br/>Naming rules:<br/>- Must start with a lowercase letter<br/>- Can contain lowercase letters, numbers, and hyphens<br/>- Must be 2-63 characters long | `string` | `null` | no |
+| <a name="input_policies"></a> [policies](#input\_policies) | Map of IAM policies to create.<br/><br/>Policies grant permissions to users, groups, or applications through rules.<br/>Each rule specifies:<br/>- permission\_set\_names: List of predefined permission sets to grant<br/>- organization\_wide: true for organization-wide permissions (the module<br/>  passes organization\_id); exclusive with project\_ids<br/>- project\_ids: For project-specific permissions (optional)<br/>- condition: CEL expression restricting when the rule applies (optional),<br/>  passed unchanged to the rule, for example an IP allow-list:<br/>  "request.ip in ['203.0.113.0/24']"<br/><br/>A policy can have multiple rules for different scopes.<br/><br/>All permission\_set\_names of one rule must share a scope (organization or<br/>project): the provider (2.89.0 and later) rejects a rule that mixes them<br/>at plan time. Split such a rule into two rules.<br/><br/>A policy has exactly one principal: user\_id (existing user), group\_key (key<br/>of var.groups), application\_key (key of var.applications) or<br/>no\_principal = true for a reusable template.<br/><br/>Common permission sets:<br/>- AllProductsFullAccess: Full access to all products<br/>- AllProductsReadOnly: Read-only access to all products<br/>- InstancesFullAccess: Full access to Instances<br/>- ObjectStorageFullAccess: Full access to Object Storage<br/>- IAMReadOnly: Read-only access to IAM<br/>- BillingReadOnly: Read-only access to billing<br/><br/>Example:<pre>hcl<br/>policies = {<br/>  admin_policy = {<br/>    name        = "admin-full-access"<br/>    description = "Full administrative access"<br/>    group_key   = "admins"<br/>    rules = [<br/>      {<br/>        permission_set_names = ["AllProductsFullAccess"]<br/>        organization_wide    = true<br/>        condition            = "request.ip in ['203.0.113.0/24']"<br/>      }<br/>    ]<br/>  }<br/>  dev_policy = {<br/>    name        = "developer-access"<br/>    description = "Developer project access"<br/>    group_key   = "developers"<br/>    rules = [<br/>      {<br/>        permission_set_names = ["InstancesFullAccess", "ObjectStorageFullAccess"]<br/>        project_ids = [<br/>          "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"<br/>        ]<br/>      }<br/>    ]<br/>  }<br/>}</pre> | <pre>map(object({<br/>    name            = string<br/>    description     = optional(string, "")<br/>    tags            = optional(list(string), [])<br/>    no_principal    = optional(bool, false)<br/>    user_id         = optional(string)<br/>    group_key       = optional(string)<br/>    application_key = optional(string)<br/>    rules = list(object({<br/>      permission_set_names = list(string)<br/>      organization_wide    = optional(bool, false)<br/>      project_ids          = optional(list(string), [])<br/>      condition            = optional(string)<br/>    }))<br/>  }))</pre> | `{}` | no |
+| <a name="input_project_id"></a> [project\_id](#input\_project\_id) | Scaleway Project ID used by the project-scoped settings of the module.<br/><br/>IAM resources are organization-scoped; only two settings depend on a<br/>project: the project of an SSH key (ssh\_keys[*].project\_id) and the default<br/>project of an API key (api\_keys[*].default\_project\_id). Each falls back to<br/>this value when it is not set on the entry.<br/><br/>When null, the provider default project applies.<br/><br/>Format: UUID (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx) | `string` | `null` | no |
 | <a name="input_require_api_key_expiration"></a> [require\_api\_key\_expiration](#input\_require\_api\_key\_expiration) | Require all API keys to have an expiration date.<br/><br/>When enabled, the plan fails (resource precondition on the API key) if any<br/>API key is configured without an expires\_at value.<br/><br/>This is a security best practice to ensure credentials are rotated. | `bool` | `false` | no |
-| <a name="input_require_api_key_secret_id"></a> [require\_api\_key\_secret\_id](#input\_require\_api\_key\_secret\_id) | Require all API keys to store their secret key in Secret Manager.<br/><br/>When enabled, the plan fails (resource precondition on the API key) if any<br/>API key is configured without a secret\_id, so no API key secret lands in<br/>the Terraform state. | `bool` | `false` | no |
-| <a name="input_ssh_keys"></a> [ssh\_keys](#input\_ssh\_keys) | Map of SSH keys to create.<br/><br/>SSH keys provide secure access to Scaleway Instances and other resources<br/>that support SSH authentication.<br/><br/>Keys are associated with the project specified in var.project\_name.<br/>If project\_id is specified in the key configuration, it overrides<br/>the default project. When project\_name is null, every key must set<br/>project\_id.<br/><br/>You can provide the public key directly or use file() function<br/>to read from a file.<br/><br/>Example:<pre>hcl<br/>ssh_keys = {<br/>  admin_key = {<br/>    name       = "admin-laptop"<br/>    public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... admin@example.com"<br/>  }<br/>  ci_key = {<br/>    name       = "gitlab-ci"<br/>    public_key = file("~/.ssh/gitlab-ci.pub")<br/>    disabled   = false<br/>  }<br/>}</pre>SECURITY NOTES:<br/>- Use Ed25519 or RSA 4096-bit keys<br/>- Protect private keys with passphrases<br/>- Rotate keys regularly<br/>- Remove unused keys promptly<br/><br/>IMPORTANT - DISABLED SSH KEYS:<br/>Scaleway API does not support creating an SSH key with disabled = true.<br/>The key must first be created with disabled = false, then on a subsequent<br/>apply you can change it to disabled = true.<br/><br/>Two-step process for disabled keys:<br/>1. First apply:  disabled = false (key is created)<br/>2. Second apply: disabled = true  (key is disabled) | <pre>map(object({<br/>    name       = string<br/>    public_key = string<br/>    project_id = optional(string)<br/>    disabled   = optional(bool, false)<br/>  }))</pre> | `{}` | no |
+| <a name="input_require_api_key_secret_id"></a> [require\_api\_key\_secret\_id](#input\_require\_api\_key\_secret\_id) | Require all API keys to store their secret key in Secret Manager.<br/><br/>When enabled (default), the plan fails (resource precondition on the API<br/>key) if any API key is configured without a secret\_id, so no API key secret<br/>lands in the Terraform state. Set secret\_id on the key (this REPLACES an<br/>existing key without one: treat it as a rotation) or opt out explicitly<br/>with false, in which case the secret key of such keys is stored in the<br/>state and exposed by the sensitive api\_key\_secret\_keys output. | `bool` | `true` | no |
+| <a name="input_ssh_keys"></a> [ssh\_keys](#input\_ssh\_keys) | Map of SSH keys to create.<br/><br/>SSH keys provide secure access to Scaleway Instances and other resources<br/>that support SSH authentication.<br/><br/>Keys are created in the project given by their own project\_id, otherwise<br/>in var.project\_id, otherwise in the provider default project.<br/><br/>You can provide the public key directly or use file() function<br/>to read from a file.<br/><br/>Example:<pre>hcl<br/>ssh_keys = {<br/>  admin_key = {<br/>    name       = "admin-laptop"<br/>    public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... admin@example.com"<br/>  }<br/>  ci_key = {<br/>    name       = "gitlab-ci"<br/>    public_key = file("~/.ssh/gitlab-ci.pub")<br/>    disabled   = false<br/>  }<br/>}</pre>SECURITY NOTES:<br/>- Use Ed25519 or RSA 4096-bit keys<br/>- Protect private keys with passphrases<br/>- Rotate keys regularly<br/>- Remove unused keys promptly<br/><br/>IMPORTANT - DISABLED SSH KEYS:<br/>Scaleway API does not support creating an SSH key with disabled = true.<br/>The key must first be created with disabled = false, then on a subsequent<br/>apply you can change it to disabled = true.<br/><br/>Two-step process for disabled keys:<br/>1. First apply:  disabled = false (key is created)<br/>2. Second apply: disabled = true  (key is disabled) | <pre>map(object({<br/>    name       = string<br/>    public_key = string<br/>    project_id = optional(string)<br/>    disabled   = optional(bool, false)<br/>  }))</pre> | `{}` | no |
 | <a name="input_tags"></a> [tags](#input\_tags) | Global tags applied to all resources that support tagging.<br/><br/>Tags are key-value pairs for organizing and categorizing resources.<br/>Common uses:<br/>- Environment identification (environment=production)<br/>- Cost allocation (team=platform, project=website)<br/>- Automation (managed-by=terraform)<br/><br/>Format: List of strings (e.g., ["env=prod", "team=devops"])<br/><br/>NOTE: The module does not validate tags; the Scaleway API enforces its own<br/>tag rules (see the Scaleway IAM documentation). | `list(string)` | `[]` | no |
-| <a name="input_users"></a> [users](#input\_users) | Map of IAM users to invite to the organization.<br/><br/>IMPORTANT: Creating a user sends an invitation email to the specified address.<br/>The user must accept the invitation to complete account setup.<br/><br/>Users can be added to groups and policies after creation.<br/>For automated/programmatic access, prefer applications over users.<br/><br/>Example:<pre>hcl<br/>users = {<br/>  admin_user = {<br/>    email    = "admin@example.com"<br/>    username = "admin"<br/>    tags     = ["admin", "human"]<br/>  }<br/>  developer = {<br/>    email    = "dev@example.com"<br/>    username = "developer"<br/>    tags     = ["developer"]<br/>    send_password_email = true<br/>    send_welcome_email  = true<br/>  }<br/>}</pre> | <pre>map(object({<br/>    email               = string<br/>    username            = string<br/>    tags                = optional(list(string), [])<br/>    send_password_email = optional(bool, false)<br/>    send_welcome_email  = optional(bool, true)<br/>  }))</pre> | `{}` | no |
+| <a name="input_users"></a> [users](#input\_users) | Map of IAM users to invite to the organization.<br/><br/>IMPORTANT: Creating a user sends an invitation email to the specified address.<br/>The user must accept the invitation to complete account setup.<br/><br/>Users can be added to groups in the same apply through the groups<br/>user\_keys, and receive policies through their groups.<br/>For automated/programmatic access, prefer applications over users.<br/><br/>Example:<pre>hcl<br/>users = {<br/>  admin_user = {<br/>    email    = "admin@example.com"<br/>    username = "admin"<br/>    tags     = ["admin", "human"]<br/>  }<br/>  developer = {<br/>    email    = "dev@example.com"<br/>    username = "developer"<br/>    tags     = ["developer"]<br/>    send_password_email = true<br/>    send_welcome_email  = true<br/>  }<br/>}</pre> | <pre>map(object({<br/>    email               = string<br/>    username            = string<br/>    tags                = optional(list(string), [])<br/>    send_password_email = optional(bool, false)<br/>    send_welcome_email  = optional(bool, true)<br/>  }))</pre> | `{}` | no |
 
 ## Outputs
 
 | Name | Description |
 |------|-------------|
-| <a name="output_api_key_access_keys"></a> [api\_key\_access\_keys](#output\_api\_key\_access\_keys) | Map of API key names to their access keys (public part only, non-sensitive). |
-| <a name="output_api_key_ids"></a> [api\_key\_ids](#output\_api\_key\_ids) | Map of API key names to their IDs. |
-| <a name="output_api_keys"></a> [api\_keys](#output\_api\_keys) | Map of all created IAM API keys (SENSITIVE).<br/><br/>Each entry contains:<br/>- id: The API key's unique identifier<br/>- access\_key: The access key (public part)<br/>- secret\_key: The secret key (SENSITIVE - handle with extreme care). It is<br/>  null when the key sets secret\_id: read it from the Secret Manager secret<br/>  instead, for example with scaleway\_secret\_version<br/>- description: The API key's description<br/>- created\_at: Creation timestamp<br/>- expires\_at: Expiration timestamp (if set)<br/><br/>SECURITY WARNING:<br/>- Store secrets in a secrets manager (Vault, AWS Secrets Manager, etc.)<br/>- Never log or expose these values<br/>- Rotate keys regularly<br/>- This output is marked sensitive but values persist in state |
+| <a name="output_api_key_secret_keys"></a> [api\_key\_secret\_keys](#output\_api\_key\_secret\_keys) | Map of API key keys to their secret key (SENSITIVE).<br/><br/>Only the keys WITHOUT secret\_id appear here, and their secret key is<br/>stored in the Terraform state. A key that sets secret\_id is absent: its<br/>secret key is in neither the state nor any output, read it from the Secret<br/>Manager secret (for example with scaleway\_secret\_version).<br/><br/>Handle with extreme care: never log these values, rotate keys regularly. |
+| <a name="output_api_keys"></a> [api\_keys](#output\_api\_keys) | Map of all created IAM API keys (no secret key).<br/><br/>Each entry contains:<br/>- id: The API key's unique identifier<br/>- access\_key: The access key (public part)<br/>- description: The API key's description<br/>- created\_at: Creation timestamp<br/>- expires\_at: Expiration timestamp (if set)<br/><br/>The secret key is never part of this output: read it from<br/>api\_key\_secret\_keys, or, for a key that sets secret\_id, from the Secret<br/>Manager secret (for example with scaleway\_secret\_version). |
 | <a name="output_application_ids"></a> [application\_ids](#output\_application\_ids) | Map of application keys to their IDs for easy lookup. |
 | <a name="output_applications"></a> [applications](#output\_applications) | Map of all created IAM applications.<br/><br/>Each entry contains:<br/>- id: The application's unique identifier<br/>- name: The application's display name<br/>- description: The application's description<br/>- created\_at: Creation timestamp<br/>- updated\_at: Last update timestamp<br/>- editable: Whether the application can be modified |
 | <a name="output_group_ids"></a> [group\_ids](#output\_group\_ids) | Map of group keys to their IDs for easy lookup. |
@@ -408,16 +444,11 @@ No modules.
 | <a name="output_groups"></a> [groups](#output\_groups) | Map of all created IAM groups.<br/><br/>Each entry contains:<br/>- id: The group's unique identifier<br/>- name: The group's display name<br/>- description: The group's description<br/>- created\_at: Creation timestamp<br/>- updated\_at: Last update timestamp |
 | <a name="output_policies"></a> [policies](#output\_policies) | Map of all created IAM policies.<br/><br/>Each entry contains:<br/>- id: The policy's unique identifier<br/>- name: The policy's display name<br/>- description: The policy's description<br/>- created\_at: Creation timestamp<br/>- updated\_at: Last update timestamp<br/>- editable: Whether the policy can be modified |
 | <a name="output_policy_ids"></a> [policy\_ids](#output\_policy\_ids) | Map of policy keys to their IDs for easy lookup. |
-| <a name="output_project_id"></a> [project\_id](#output\_project\_id) | The ID of the Scaleway project (if project\_name was provided). |
-| <a name="output_security_audit"></a> [security\_audit](#output\_security\_audit) | Security-relevant information for auditing.<br/><br/>Lists of input map keys:<br/>- api\_keys\_without\_expiration: API keys without expires\_at (security risk)<br/>- api\_keys\_expiring\_soon: every API key that has an expires\_at, whatever<br/>  the date (the name is kept for compatibility; it is not a time window)<br/>- api\_keys\_secret\_in\_state: API keys without secret\_id (their secret key<br/>  is stored in the state)<br/>- disabled\_ssh\_keys: SSH keys with disabled = true<br/>- active\_ssh\_keys: SSH keys with disabled = false |
-| <a name="output_ssh_key_fingerprints"></a> [ssh\_key\_fingerprints](#output\_ssh\_key\_fingerprints) | Map of SSH key names to their fingerprints. |
-| <a name="output_ssh_key_ids"></a> [ssh\_key\_ids](#output\_ssh\_key\_ids) | Map of SSH key names to their IDs for easy lookup. |
-| <a name="output_ssh_key_public_keys"></a> [ssh\_key\_public\_keys](#output\_ssh\_key\_public\_keys) | Map of SSH key names to their public keys. |
-| <a name="output_ssh_keys"></a> [ssh\_keys](#output\_ssh\_keys) | Map of all created IAM SSH keys.<br/><br/>Each entry contains:<br/>- id: The SSH key's unique identifier<br/>- name: The SSH key's display name<br/>- fingerprint: The SSH key fingerprint<br/>- created\_at: Creation timestamp<br/>- updated\_at: Last update timestamp<br/>- project\_id: Associated project ID<br/>- disabled: Whether the key is disabled<br/><br/>Note: Public keys are not included in this output.<br/>Use ssh\_key\_public\_keys if you need them. |
-| <a name="output_summary"></a> [summary](#output\_summary) | Summary statistics for all IAM resources created by this module.<br/><br/>Useful for monitoring and auditing purposes. |
+| <a name="output_security_audit"></a> [security\_audit](#output\_security\_audit) | Security-relevant information for auditing.<br/><br/>Lists of input map keys:<br/>- api\_keys\_without\_expiration: API keys without expires\_at (security risk)<br/>- api\_keys\_with\_expiration: every API key that has an expires\_at, whatever<br/>  the date (it is not a time window)<br/>- api\_keys\_secret\_in\_state: API keys without secret\_id (their secret key<br/>  is stored in the state)<br/>- users\_without\_mfa: users whose mfa is not enabled<br/>- disabled\_ssh\_keys: SSH keys with disabled = true<br/>- active\_ssh\_keys: SSH keys with disabled = false |
+| <a name="output_ssh_keys"></a> [ssh\_keys](#output\_ssh\_keys) | Map of all created IAM SSH keys.<br/><br/>Each entry contains:<br/>- id: The SSH key's unique identifier<br/>- name: The SSH key's display name<br/>- fingerprint: The SSH key fingerprint<br/>- created\_at: Creation timestamp<br/>- updated\_at: Last update timestamp<br/>- project\_id: Associated project ID<br/>- disabled: Whether the key is disabled<br/><br/>Note: Public keys are not included in this output; they are your own<br/>input. |
 | <a name="output_user_details"></a> [user\_details](#output\_user\_details) | Full user details including PII (SENSITIVE).<br/><br/>Contains email addresses - handle according to privacy regulations. |
 | <a name="output_user_ids"></a> [user\_ids](#output\_user\_ids) | Map of user keys to their IDs for easy lookup. |
-| <a name="output_users"></a> [users](#output\_users) | Map of all created IAM users (non-sensitive, no email address).<br/><br/>Each entry contains:<br/>- id: The user's unique identifier<br/>- created\_at: Creation timestamp<br/>- updated\_at: Last update timestamp<br/>- status: The user's account status<br/>- type: The user's type (owner, guest, etc.)<br/><br/>Note: Email addresses are excluded from this output.<br/>Use the sensitive user\_details output if you need email addresses. |
+| <a name="output_users"></a> [users](#output\_users) | Map of all created IAM users (non-sensitive, no email address).<br/><br/>Each entry contains:<br/>- id: The user's unique identifier<br/>- created\_at: Creation timestamp<br/>- updated\_at: Last update timestamp<br/>- status: The user's account status<br/>- type: The user's type (owner, guest, etc.)<br/>- mfa: Whether the user has enabled multi-factor authentication<br/>- locked: Whether the user is locked<br/><br/>Note: Email addresses are excluded from this output.<br/>Use the sensitive user\_details output if you need email addresses. |
 <!-- END_TF_DOCS -->
 
 ## Contributing

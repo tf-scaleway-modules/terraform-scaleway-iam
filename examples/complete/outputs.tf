@@ -2,11 +2,6 @@
 # ║                     COMPLETE EXAMPLE - OUTPUTS                                ║
 # ╚══════════════════════════════════════════════════════════════════════════════╝
 
-output "summary" {
-  description = "Summary of all IAM resources created"
-  value       = module.iam.summary
-}
-
 output "applications" {
   description = "All created IAM applications"
   value       = module.iam.applications
@@ -17,14 +12,14 @@ output "application_ids" {
   value       = module.iam.application_ids
 }
 
-output "api_key_access_keys" {
-  description = "API key access keys (public part)"
-  value       = module.iam.api_key_access_keys
+output "api_keys" {
+  description = "API keys: ID, access key and dates (no secret key)"
+  value       = module.iam.api_keys
 }
 
-output "api_keys" {
-  description = "Full API key information (sensitive)"
-  value       = module.iam.api_keys
+output "api_key_secret_keys" {
+  description = "Secret keys of the API keys without secret_id (sensitive)"
+  value       = module.iam.api_key_secret_keys
   sensitive   = true
 }
 
@@ -38,6 +33,11 @@ output "group_ids" {
   value       = module.iam.group_ids
 }
 
+output "group_memberships" {
+  description = "Group membership assignments"
+  value       = module.iam.group_memberships
+}
+
 output "policies" {
   description = "All created IAM policies"
   value       = module.iam.policies
@@ -49,8 +49,13 @@ output "policy_ids" {
 }
 
 output "users" {
-  description = "All created IAM users (non-sensitive)"
+  description = "All created IAM users (non-sensitive), with MFA and lock state"
   value       = module.iam.users
+}
+
+output "user_ids" {
+  description = "User IDs for reference"
+  value       = module.iam.user_ids
 }
 
 output "user_details" {
@@ -59,24 +64,9 @@ output "user_details" {
   sensitive   = true
 }
 
-output "user_ids" {
-  description = "User IDs for reference"
-  value       = module.iam.user_ids
-}
-
 output "ssh_keys" {
-  description = "All created SSH keys"
+  description = "All created SSH keys, with their fingerprint"
   value       = module.iam.ssh_keys
-}
-
-output "ssh_key_fingerprints" {
-  description = "SSH key fingerprints for verification"
-  value       = module.iam.ssh_key_fingerprints
-}
-
-output "group_memberships" {
-  description = "Group membership assignments"
-  value       = module.iam.group_memberships
 }
 
 output "security_audit" {
