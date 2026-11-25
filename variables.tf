@@ -13,14 +13,7 @@
 # ==============================================================================
 
 variable "organization_id" {
-  description = <<-EOT
-    Scaleway Organization ID.
-
-    The organization is the top-level entity in Scaleway's hierarchy.
-    Find this in the Scaleway Console under Organization Settings.
-
-    Format: UUID (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)
-  EOT
+  description = "Scaleway Organization ID (UUID), the top-level entity of the Scaleway hierarchy, found in the Console under Organization Settings."
   type        = string
 
   validation {
@@ -30,18 +23,7 @@ variable "organization_id" {
 }
 
 variable "project_id" {
-  description = <<-EOT
-    Scaleway Project ID used by the project-scoped settings of the module.
-
-    IAM resources are organization-scoped; only two settings depend on a
-    project: the project of an SSH key (ssh_keys[*].project_id) and the default
-    project of an API key (api_keys[*].default_project_id). Each falls back to
-    this value when it is not set on the entry.
-
-    When null, the provider default project applies.
-
-    Format: UUID (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)
-  EOT
+  description = "Scaleway Project ID (UUID) used as the fallback for `ssh_keys[*].project_id` and `api_keys[*].default_project_id` when they are not set. `null` means the provider default project applies."
   type        = string
   default     = null
 
@@ -58,20 +40,7 @@ variable "project_id" {
 # ==============================================================================
 
 variable "tags" {
-  description = <<-EOT
-    Global tags applied to all resources that support tagging.
-
-    Tags are key-value pairs for organizing and categorizing resources.
-    Common uses:
-    - Environment identification (environment=production)
-    - Cost allocation (team=platform, project=website)
-    - Automation (managed-by=terraform)
-
-    Format: List of strings (e.g., ["env=prod", "team=devops"])
-
-    NOTE: The module does not validate tags; the Scaleway API enforces its own
-    tag rules (see the Scaleway IAM documentation).
-  EOT
+  description = "Global tags applied to every resource that supports tagging, as a list of strings such as `[\"env=prod\", \"team=devops\"]`. The module does not validate them; the Scaleway API enforces its own tag rules."
   type        = list(string)
   default     = []
 }
@@ -83,39 +52,13 @@ variable "tags" {
 # ==============================================================================
 
 variable "enable_deletion_protection" {
-  description = <<-EOT
-    Enable deletion protection for critical IAM resources.
-
-    When enabled, a terraform_data guard with prevent_destroy protects each of:
-    - IAM Applications
-    - IAM Groups
-    - IAM Policies
-
-    Any plan that destroys a guard fails: terraform destroy, removing an entry
-    from applications, groups or policies, and switching this flag from true to
-    false on an existing deployment (prevent_destroy cannot be switched off by
-    a variable). Set it to false at creation for development environments.
-
-    To lift protection on an existing deployment, remove the guards from state
-    first (this leaves the IAM resources untouched), then destroy or remove the
-    entry:
-    - all: terraform state rm 'module.<name>.terraform_data.application_deletion_protection'
-      (same for group_deletion_protection and policy_deletion_protection)
-    - one entry: terraform state rm 'module.<name>.terraform_data.application_deletion_protection["<key>"]'
-  EOT
+  description = "Whether a `terraform_data` guard with `prevent_destroy` protects every application, group and policy, so any plan that destroys one fails. Switching it from `true` to `false` on an existing deployment also fails; see Deletion Protection in the README to lift protection."
   type        = bool
   default     = true
 }
 
 variable "require_api_key_expiration" {
-  description = <<-EOT
-    Require all API keys to have an expiration date.
-
-    When enabled, the plan fails (resource precondition on the API key) if any
-    API key is configured without an expires_at value.
-
-    This is a security best practice to ensure credentials are rotated.
-  EOT
+  description = "Whether the plan fails when an API key is configured without `expires_at`, which enforces credential rotation."
   type        = bool
   default     = false
 }
@@ -123,16 +66,7 @@ variable "require_api_key_expiration" {
 # DEVIATION(terraform-variables): the name follows the released sibling
 # require_api_key_expiration instead of the enable_/is_ boolean prefix.
 variable "require_api_key_secret_id" {
-  description = <<-EOT
-    Require all API keys to store their secret key in Secret Manager.
-
-    When enabled (default), the plan fails (resource precondition on the API
-    key) if any API key is configured without a secret_id, so no API key secret
-    lands in the Terraform state. Set secret_id on the key (this REPLACES an
-    existing key without one: treat it as a rotation) or opt out explicitly
-    with false, in which case the secret key of such keys is stored in the
-    state and exposed by the sensitive api_key_secret_keys output.
-  EOT
+  description = "Whether the plan fails when an API key is configured without `secret_id`, so that no API key secret lands in the state. Setting `false` opts out and stores those secret keys in the state, exposed by the sensitive `api_key_secret_keys` output."
   type        = bool
   default     = true
 }
@@ -148,32 +82,7 @@ variable "require_api_key_secret_id" {
 # ==============================================================================
 
 variable "applications" {
-  description = <<-EOT
-    Map of IAM applications (service accounts) to create.
-
-    Applications provide identity for non-human users, enabling:
-    - Programmatic access via API keys
-    - Fine-grained permissions via policies
-    - Audit trail separation from human users
-
-    Each application key becomes part of the resource identifier.
-
-    Example:
-    ```hcl
-    applications = {
-      terraform = {
-        name        = "terraform-automation"
-        description = "Terraform infrastructure management"
-        tags        = ["automation", "terraform"]
-      }
-      cicd = {
-        name        = "gitlab-ci"
-        description = "GitLab CI/CD pipeline"
-        tags        = ["ci", "gitlab"]
-      }
-    }
-    ```
-  EOT
+  description = "Map of IAM applications (service accounts for non-human access) to create, keyed by a stable reference used by `api_keys`, `groups` and `policies`. See Input reference in the README for every attribute."
   type = map(object({
     name        = string
     description = optional(string, "")
@@ -201,52 +110,7 @@ variable "applications" {
 # ==============================================================================
 
 variable "api_keys" {
-  description = <<-EOT
-    Map of IAM API keys to create.
-
-    API keys authenticate programmatic access to Scaleway APIs.
-
-    IMPORTANT: Each key must be associated with EITHER an application_key
-    OR a user_id, but NOT both.
-
-    - application_key: Key of an application defined in var.applications
-    - user_id: UUID of an existing IAM user
-
-    - default_project_id: default project context of the key; falls back to
-      var.project_id when not set.
-    - expires_at: expiration date, UTC, in the form YYYY-MM-DDTHH:MM:SSZ.
-    - secret_id: ID of an existing Secret Manager secret (UUID or
-      <region>/<uuid>) that receives the secret key as a new secret version.
-      The secret key is then kept out of the state and the module outputs
-      (it is absent from api_key_secret_keys). The module does not create or
-      manage the secret. Required for every key while
-      require_api_key_secret_id is true (default). Changing secret_id on an
-      existing key REPLACES the key (new access key and secret key), treat it
-      as a rotation.
-
-    Example:
-    ```hcl
-    api_keys = {
-      terraform_key = {
-        application_key    = "terraform"  # References var.applications["terraform"]
-        description        = "Terraform automation key"
-        expires_at         = "2025-12-31T23:59:59Z"
-        default_project_id = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-        secret_id          = "fr-par/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-      }
-      user_automation = {
-        user_id     = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-        description = "Personal automation key for admin user"
-      }
-    }
-    ```
-
-    SECURITY NOTES:
-    - Set expires_at for time-limited access
-    - Use application keys over user keys when possible
-    - Rotate keys regularly
-    - Never expose keys in logs or version control
-  EOT
+  description = "Map of IAM API keys to create, keyed by a stable reference. Each key sets exactly one of `application_key` or `user_id`; `secret_id` keeps the secret key out of the state and outputs by sending it to Secret Manager. See Input reference in the README for every attribute."
   type = map(object({
     application_key    = optional(string)
     user_id            = optional(string)
@@ -315,47 +179,7 @@ variable "api_keys" {
 # ==============================================================================
 
 variable "groups" {
-  description = <<-EOT
-    Map of IAM groups to create.
-
-    Groups enable collective permission management by:
-    - Grouping related users and applications
-    - Attaching policies to multiple identities at once
-    - Simplifying permission audits
-
-    Best practice: Organize groups by role or function rather than by team.
-
-    Members, all optional:
-    - application_keys: keys of var.applications
-    - user_keys: keys of var.users (users invited by this module, added in the
-      same apply)
-    - user_ids: IDs of existing users
-
-    The module declares external membership to the provider on every group and
-    manages members only through these lists. A group with empty lists gets no
-    member from the module, so members added elsewhere (console, other
-    configuration) are left alone.
-
-    Example:
-    ```hcl
-    groups = {
-      admins = {
-        name        = "organization-admins"
-        description = "Full administrative access"
-        tags        = ["admin", "privileged"]
-      }
-      developers = {
-        name             = "developers"
-        description      = "Development team access"
-        application_keys = ["cicd"]
-        user_keys        = ["alice"]
-        user_ids = [
-          "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-        ]
-      }
-    }
-    ```
-  EOT
+  description = "Map of IAM groups to create, keyed by a stable reference used by `policies`. Members are managed only through `application_keys`, `user_keys` and `user_ids`. See Input reference in the README for every attribute."
   type = map(object({
     name             = string
     description      = optional(string, "")
@@ -423,68 +247,7 @@ variable "groups" {
 # ==============================================================================
 
 variable "policies" {
-  description = <<-EOT
-    Map of IAM policies to create.
-
-    Policies grant permissions to users, groups, or applications through rules.
-    Each rule specifies:
-    - permission_set_names: List of predefined permission sets to grant
-    - organization_wide: true for organization-wide permissions (the module
-      passes organization_id); exclusive with project_ids
-    - project_ids: For project-specific permissions (optional)
-    - condition: CEL expression restricting when the rule applies (optional),
-      passed unchanged to the rule, for example an IP allow-list:
-      "request.ip in ['203.0.113.0/24']"
-
-    A policy can have multiple rules for different scopes.
-
-    All permission_set_names of one rule must share a scope (organization or
-    project): the provider (2.89.0 and later) rejects a rule that mixes them
-    at plan time. Split such a rule into two rules.
-
-    A policy has exactly one principal: user_id (existing user), group_key (key
-    of var.groups), application_key (key of var.applications) or
-    no_principal = true for a reusable template.
-
-    Common permission sets:
-    - AllProductsFullAccess: Full access to all products
-    - AllProductsReadOnly: Read-only access to all products
-    - InstancesFullAccess: Full access to Instances
-    - ObjectStorageFullAccess: Full access to Object Storage
-    - IAMReadOnly: Read-only access to IAM
-    - BillingReadOnly: Read-only access to billing
-
-    Example:
-    ```hcl
-    policies = {
-      admin_policy = {
-        name        = "admin-full-access"
-        description = "Full administrative access"
-        group_key   = "admins"
-        rules = [
-          {
-            permission_set_names = ["AllProductsFullAccess"]
-            organization_wide    = true
-            condition            = "request.ip in ['203.0.113.0/24']"
-          }
-        ]
-      }
-      dev_policy = {
-        name        = "developer-access"
-        description = "Developer project access"
-        group_key   = "developers"
-        rules = [
-          {
-            permission_set_names = ["InstancesFullAccess", "ObjectStorageFullAccess"]
-            project_ids = [
-              "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-            ]
-          }
-        ]
-      }
-    }
-    ```
-  EOT
+  description = "Map of IAM policies to create, keyed by a stable reference. Each policy has exactly one principal and one or more rules granting permission sets. See Input reference in the README for every attribute."
   type = map(object({
     name            = string
     description     = optional(string, "")
@@ -575,34 +338,7 @@ variable "policies" {
 # ==============================================================================
 
 variable "users" {
-  description = <<-EOT
-    Map of IAM users to invite to the organization.
-
-    IMPORTANT: Creating a user sends an invitation email to the specified address.
-    The user must accept the invitation to complete account setup.
-
-    Users can be added to groups in the same apply through the groups
-    user_keys, and receive policies through their groups.
-    For automated/programmatic access, prefer applications over users.
-
-    Example:
-    ```hcl
-    users = {
-      admin_user = {
-        email    = "admin@example.com"
-        username = "admin"
-        tags     = ["admin", "human"]
-      }
-      developer = {
-        email    = "dev@example.com"
-        username = "developer"
-        tags     = ["developer"]
-        send_password_email = true
-        send_welcome_email  = true
-      }
-    }
-    ```
-  EOT
+  description = "Map of IAM users to invite to the organization, keyed by a stable reference used by `groups[*].user_keys`. Creating a user sends an invitation email. See Input reference in the README for every attribute."
   type = map(object({
     email               = string
     username            = string
@@ -635,48 +371,7 @@ variable "users" {
 # ==============================================================================
 
 variable "ssh_keys" {
-  description = <<-EOT
-    Map of SSH keys to create.
-
-    SSH keys provide secure access to Scaleway Instances and other resources
-    that support SSH authentication.
-
-    Keys are created in the project given by their own project_id, otherwise
-    in var.project_id, otherwise in the provider default project.
-
-    You can provide the public key directly or use file() function
-    to read from a file.
-
-    Example:
-    ```hcl
-    ssh_keys = {
-      admin_key = {
-        name       = "admin-laptop"
-        public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... admin@example.com"
-      }
-      ci_key = {
-        name       = "gitlab-ci"
-        public_key = file("~/.ssh/gitlab-ci.pub")
-        disabled   = false
-      }
-    }
-    ```
-
-    SECURITY NOTES:
-    - Use Ed25519 or RSA 4096-bit keys
-    - Protect private keys with passphrases
-    - Rotate keys regularly
-    - Remove unused keys promptly
-
-    IMPORTANT - DISABLED SSH KEYS:
-    Scaleway API does not support creating an SSH key with disabled = true.
-    The key must first be created with disabled = false, then on a subsequent
-    apply you can change it to disabled = true.
-
-    Two-step process for disabled keys:
-    1. First apply:  disabled = false (key is created)
-    2. Second apply: disabled = true  (key is disabled)
-  EOT
+  description = "Map of IAM SSH keys to create, keyed by a stable reference. A key cannot be created with `disabled = true`; see Input reference in the README for every attribute and the two-step process."
   type = map(object({
     name       = string
     public_key = string

@@ -16,17 +16,7 @@
 # ==============================================================================
 
 output "applications" {
-  description = <<-EOT
-    Map of all created IAM applications.
-
-    Each entry contains:
-    - id: The application's unique identifier
-    - name: The application's display name
-    - description: The application's description
-    - created_at: Creation timestamp
-    - updated_at: Last update timestamp
-    - editable: Whether the application can be modified
-  EOT
+  description = "Map of all created IAM applications, keyed like the `applications` input, with `id`, `name`, `description`, `created_at`, `updated_at` and `editable`."
   value = {
     for k, v in scaleway_iam_application.this : k => {
       id          = v.id
@@ -53,20 +43,7 @@ output "application_ids" {
 # ==============================================================================
 
 output "api_keys" {
-  description = <<-EOT
-    Map of all created IAM API keys (no secret key).
-
-    Each entry contains:
-    - id: The API key's unique identifier
-    - access_key: The access key (public part)
-    - description: The API key's description
-    - created_at: Creation timestamp
-    - expires_at: Expiration timestamp (if set)
-
-    The secret key is never part of this output: read it from
-    api_key_secret_keys, or, for a key that sets secret_id, from the Secret
-    Manager secret (for example with scaleway_secret_version).
-  EOT
+  description = "Map of all created IAM API keys without their secret key, keyed like the `api_keys` input, with `id`, `access_key`, `description`, `created_at` and `expires_at`. The secret key comes from `api_key_secret_keys` or, for a key that sets `secret_id`, from the Secret Manager secret."
   value = {
     for k, v in scaleway_iam_api_key.this : k => {
       id          = v.id
@@ -79,16 +56,7 @@ output "api_keys" {
 }
 
 output "api_key_secret_keys" {
-  description = <<-EOT
-    Map of API key keys to their secret key (SENSITIVE).
-
-    Only the keys WITHOUT secret_id appear here, and their secret key is
-    stored in the Terraform state. A key that sets secret_id is absent: its
-    secret key is in neither the state nor any output, read it from the Secret
-    Manager secret (for example with scaleway_secret_version).
-
-    Handle with extreme care: never log these values, rotate keys regularly.
-  EOT
+  description = "Sensitive map of API key references to their secret key, only for keys WITHOUT `secret_id`, whose secret key is stored in the state. A key that sets `secret_id` is absent: read its secret key from the Secret Manager secret."
   value = {
     for k, v in scaleway_iam_api_key.this : k => v.secret_key if v.secret_id == null
   }
@@ -100,16 +68,7 @@ output "api_key_secret_keys" {
 # ==============================================================================
 
 output "groups" {
-  description = <<-EOT
-    Map of all created IAM groups.
-
-    Each entry contains:
-    - id: The group's unique identifier
-    - name: The group's display name
-    - description: The group's description
-    - created_at: Creation timestamp
-    - updated_at: Last update timestamp
-  EOT
+  description = "Map of all created IAM groups, keyed like the `groups` input, with `id`, `name`, `description`, `created_at` and `updated_at`."
   value = {
     for k, v in scaleway_iam_group.this : k => {
       id          = v.id
@@ -127,11 +86,7 @@ output "group_ids" {
 }
 
 output "group_memberships" {
-  description = <<-EOT
-    Summary of all group memberships created by this module.
-
-    Includes both application and user memberships organized by group.
-  EOT
+  description = "Group memberships created by this module, as `applications` and `users` maps whose entries hold the `group_id` and the `application_id` or `user_id`."
   value = {
     applications = {
       for k, v in scaleway_iam_group_membership.applications : k => {
@@ -153,17 +108,7 @@ output "group_memberships" {
 # ==============================================================================
 
 output "policies" {
-  description = <<-EOT
-    Map of all created IAM policies.
-
-    Each entry contains:
-    - id: The policy's unique identifier
-    - name: The policy's display name
-    - description: The policy's description
-    - created_at: Creation timestamp
-    - updated_at: Last update timestamp
-    - editable: Whether the policy can be modified
-  EOT
+  description = "Map of all created IAM policies, keyed like the `policies` input, with `id`, `name`, `description`, `created_at`, `updated_at` and `editable`."
   value = {
     for k, v in scaleway_iam_policy.this : k => {
       id          = v.id
@@ -189,21 +134,7 @@ output "policy_ids" {
 # ==============================================================================
 
 output "users" {
-  description = <<-EOT
-    Map of all created IAM users (non-sensitive, no email address).
-
-    Each entry contains:
-    - id: The user's unique identifier
-    - created_at: Creation timestamp
-    - updated_at: Last update timestamp
-    - status: The user's account status
-    - type: The user's type (owner, guest, etc.)
-    - mfa: Whether the user has enabled multi-factor authentication
-    - locked: Whether the user is locked
-
-    Note: Email addresses are excluded from this output.
-    Use the sensitive user_details output if you need email addresses.
-  EOT
+  description = "Map of all created IAM users without their email address, keyed like the `users` input, with `id`, `created_at`, `updated_at`, `status`, `type`, `mfa` and `locked`. Use the sensitive `user_details` output for email addresses."
   value = {
     for k, v in scaleway_iam_user.this : k => {
       id         = v.id
@@ -223,11 +154,7 @@ output "user_ids" {
 }
 
 output "user_details" {
-  description = <<-EOT
-    Full user details including PII (SENSITIVE).
-
-    Contains email addresses - handle according to privacy regulations.
-  EOT
+  description = "Sensitive map of full user details including the email address (PII), keyed like the `users` input. Handle according to privacy regulations."
   value = {
     for k, v in scaleway_iam_user.this : k => {
       id            = v.id
@@ -249,21 +176,7 @@ output "user_details" {
 # ==============================================================================
 
 output "ssh_keys" {
-  description = <<-EOT
-    Map of all created IAM SSH keys.
-
-    Each entry contains:
-    - id: The SSH key's unique identifier
-    - name: The SSH key's display name
-    - fingerprint: The SSH key fingerprint
-    - created_at: Creation timestamp
-    - updated_at: Last update timestamp
-    - project_id: Associated project ID
-    - disabled: Whether the key is disabled
-
-    Note: Public keys are not included in this output; they are your own
-    input.
-  EOT
+  description = "Map of all created IAM SSH keys, keyed like the `ssh_keys` input, with `id`, `name`, `fingerprint`, `created_at`, `updated_at`, `project_id` and `disabled`. Public keys are not included."
   value = {
     for k, v in scaleway_iam_ssh_key.this : k => {
       id          = v.id
@@ -282,19 +195,7 @@ output "ssh_keys" {
 # ==============================================================================
 
 output "security_audit" {
-  description = <<-EOT
-    Security-relevant information for auditing.
-
-    Lists of input map keys:
-    - api_keys_without_expiration: API keys without expires_at (security risk)
-    - api_keys_with_expiration: every API key that has an expires_at, whatever
-      the date (it is not a time window)
-    - api_keys_secret_in_state: API keys without secret_id (their secret key
-      is stored in the state)
-    - users_without_mfa: users whose mfa is not enabled
-    - disabled_ssh_keys: SSH keys with disabled = true
-    - active_ssh_keys: SSH keys with disabled = false
-  EOT
+  description = "Lists of input map keys for auditing: API keys without and with `expires_at`, API keys whose secret key is stored in the state, users without MFA, and disabled and active SSH keys."
   value = {
     api_keys_without_expiration = [
       for k, v in scaleway_iam_api_key.this : k if v.expires_at == null
