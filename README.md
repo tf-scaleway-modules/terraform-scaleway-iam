@@ -602,14 +602,14 @@ Rollback: pin `v2.0.0` and restore the previous inputs; the groups flip back in 
 ## Requirements
 
 | Name | Version |
-|------|---------|
+| ---- | ------- |
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.10.7 |
 | <a name="requirement_scaleway"></a> [scaleway](#requirement\_scaleway) | ~> 2.89 |
 
 ## Providers
 
 | Name | Version |
-|------|---------|
+| ---- | ------- |
 | <a name="provider_scaleway"></a> [scaleway](#provider\_scaleway) | ~> 2.89 |
 | <a name="provider_terraform"></a> [terraform](#provider\_terraform) | n/a |
 
@@ -620,7 +620,7 @@ No modules.
 ## Resources
 
 | Name | Type |
-|------|------|
+| ---- | ---- |
 | [scaleway_iam_api_key.this](https://registry.terraform.io/providers/scaleway/scaleway/latest/docs/resources/iam_api_key) | resource |
 | [scaleway_iam_application.this](https://registry.terraform.io/providers/scaleway/scaleway/latest/docs/resources/iam_application) | resource |
 | [scaleway_iam_group.this](https://registry.terraform.io/providers/scaleway/scaleway/latest/docs/resources/iam_group) | resource |
@@ -636,7 +636,7 @@ No modules.
 ## Inputs
 
 | Name | Description | Type | Default | Required |
-|------|-------------|------|---------|:--------:|
+| ---- | ----------- | ---- | ------- | :------: |
 | <a name="input_api_keys"></a> [api\_keys](#input\_api\_keys) | Map of IAM API keys to create, keyed by a stable reference. Each key sets exactly one of `application_key` or `user_id`; `secret_id` keeps the secret key out of the state and outputs by sending it to Secret Manager. See Input reference in the README for every attribute. | <pre>map(object({<br/>    application_key    = optional(string)<br/>    user_id            = optional(string)<br/>    description        = optional(string, "")<br/>    expires_at         = optional(string)<br/>    default_project_id = optional(string)<br/>    secret_id          = optional(string)<br/>  }))</pre> | `{}` | no |
 | <a name="input_applications"></a> [applications](#input\_applications) | Map of IAM applications (service accounts for non-human access) to create, keyed by a stable reference used by `api_keys`, `groups` and `policies`. See Input reference in the README for every attribute. | <pre>map(object({<br/>    name        = string<br/>    description = optional(string, "")<br/>    tags        = optional(list(string), [])<br/>  }))</pre> | `{}` | no |
 | <a name="input_enable_deletion_protection"></a> [enable\_deletion\_protection](#input\_enable\_deletion\_protection) | Whether a `terraform_data` guard with `prevent_destroy` protects every application, group and policy, so any plan that destroys one fails. Switching it from `true` to `false` on an existing deployment also fails; see Deletion Protection in the README to lift protection. | `bool` | `true` | no |
@@ -653,7 +653,7 @@ No modules.
 ## Outputs
 
 | Name | Description |
-|------|-------------|
+| ---- | ----------- |
 | <a name="output_api_key_secret_keys"></a> [api\_key\_secret\_keys](#output\_api\_key\_secret\_keys) | Sensitive map of API key references to their secret key, only for keys WITHOUT `secret_id`, whose secret key is stored in the state. A key that sets `secret_id` is absent: read its secret key from the Secret Manager secret. |
 | <a name="output_api_keys"></a> [api\_keys](#output\_api\_keys) | Map of all created IAM API keys without their secret key, keyed like the `api_keys` input, with `id`, `access_key`, `description`, `created_at` and `expires_at`. The secret key comes from `api_key_secret_keys` or, for a key that sets `secret_id`, from the Secret Manager secret. |
 | <a name="output_application_ids"></a> [application\_ids](#output\_application\_ids) | Map of application keys to their IDs for easy lookup. |
