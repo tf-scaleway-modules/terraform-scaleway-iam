@@ -6,10 +6,10 @@ Supported tool and provider versions, input defaults and shared validation, glob
 ## Requirements
 
 ### Requirement: Supported tooling and providers
-The module SHALL require OpenTofu or Terraform `>= 1.10.7` and the `scaleway/scaleway` provider `~> 2.89`. It SHALL NOT declare any `provider {}` or `backend {}` block: the caller configures the Scaleway provider and the backend.
+The module SHALL require OpenTofu or Terraform `>= 1.11.0`, declared once in `required_version` and read by both tools, and the `scaleway/scaleway` provider `~> 2.89`. It SHALL NOT declare any `provider {}` or `backend {}` block: the caller configures the Scaleway provider and the backend.
 
 #### Scenario: Older tool version
-- **WHEN** the module is initialized with a tool older than 1.10.7
+- **WHEN** the module is initialized with OpenTofu or Terraform older than 1.11.0
 - **THEN** initialization fails on the `required_version` constraint
 
 #### Scenario: Older provider version
@@ -19,6 +19,10 @@ The module SHALL require OpenTofu or Terraform `>= 1.10.7` and the `scaleway/sca
 #### Scenario: Caller owns the provider
 - **WHEN** the module is called from a root module that configures the `scaleway` provider
 - **THEN** the module uses that provider configuration and declares none of its own
+
+#### Scenario: Both tools validate
+- **WHEN** `tofu validate` and `terraform validate` run on the module root and on each example
+- **THEN** both succeed
 
 ### Requirement: Organization input
 `organization_id` SHALL be a required string and MUST match a lowercase UUID (`xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`). It SHALL be passed as `organization_id` to every application, group, policy and user. IAM resources are organization-scoped, so the input stays.

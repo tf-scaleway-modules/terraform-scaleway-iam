@@ -1,7 +1,7 @@
 # AGENTS.md — terraform-modules-scaleway-iam
 
 ## Project
-OpenTofu/Terraform module: manages Scaleway IAM (applications, API keys, groups and
+OpenTofu >= 1.11.0 / Terraform >= 1.11.0 module: manages Scaleway IAM (applications, API keys, groups and
 memberships, policies, users, SSH keys). Published on GitLab at
 `gitlab.com/leminnov/terraform/modules/scaleway-iam`;
 consumers pin a git tag. Planning uses OpenSpec (`openspec/`). Engineering
@@ -75,7 +75,7 @@ Never deviate silently: add a `# DEVIATION(<spec-id>): <reason>` comment and lis
 in your summary.
 
 ## Commands
-- Format / validate: `tofu fmt -recursive`, `tofu init -backend=false && tofu validate`, `tflint --recursive`
+- Format / validate: `tofu fmt -recursive`, `tofu init -backend=false && tofu validate`, `terraform init -backend=false && terraform validate`, `tflint --recursive`
 - Tests: `tofu test` (unit tests in `tests/main.tftest.hcl`, mock provider, no Scaleway account)
 - Everything incl. README regeneration: `pre-commit run -a`; changelog: `mise run changelog`
 - Specs: `mise run spec-validate`; standards stores: `mise run spec-setup`
