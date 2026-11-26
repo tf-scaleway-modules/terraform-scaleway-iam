@@ -13,6 +13,7 @@ validate:terraform CI job, align the GitHub workflows, keep the pre-commit
 Terraform hooks on tofu and adopt terraform standards v2.1.0.
 - Regenerate the README input and output tables with terraform-docs
 - Rewrite input and output descriptions as single-line prose so they render on the Terraform Registry
+## [3.0.0] - 2026-11-01
 - Use project_id, one principal per policy, policy conditions, group user_keys and secret_id by default
 
 BREAKING: v3.0.0.
@@ -34,6 +35,7 @@ BREAKING: v3.0.0.
 - expires_at must be a real date; SSH keys must use a real key type prefix.
 
 See "Upgrading from v2 to v3" in the README.
+## [2.0.0] - 2026-10-31
 - Store API key secrets in Secret Manager with secret_id and require Scaleway provider ~> 2.89
 
 BREAKING: the module now requires the scaleway/scaleway provider ~> 2.89
@@ -49,6 +51,7 @@ BREAKING: the module now requires the scaleway/scaleway provider ~> 2.89
 Upgrade notes: bump the tag and run `tofu init -upgrade`; existing keys plan
 no change. Adding secret_id to an existing key replaces it (rotation), so
 adopt it per key and update consumers of the access key.
+## [1.2.2] - 2026-10-28
 - Fix IAM reference validation and correct deletion protection docs
 
 - Validate unknown application and group references, user ID prefix collisions in a group and SSH keys without a project at plan time.
@@ -59,6 +62,7 @@ adopt it per key and update consumers of the access key.
 No upgrade action needed: the new validations reject only configurations that already failed.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+## [1.2.1] - 2026-10-28
 - Key the pre-commit cache on mise.toml and .pre-commit-config.yaml
 
 The cache was keyed on the branch, so a branch kept tools installed by the previous mise, which the new one no longer puts on PATH (tofu not found). Keying it on the files that define the toolchain, as in scaleway-compute and scaleway-storage, starts a fresh cache whenever the toolchain changes and shares it across branches and tags.
@@ -82,12 +86,14 @@ spec-validate and spec-setup tasks, and the validate:specs CI job runs
 openspec validate --all --strict. The module contract is unchanged.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+## [1.2.0] - 2026-10-14
 - chore(deps): upgrade scaleway provider to ~> 2.86
 
 - Bump the scaleway provider constraint to ~> 2.86 (module and examples).
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 - typo
+## [1.0.0] - 2025-12-22
 - Updates Scaleway provider version
 
 Changes the Scaleway provider version constraint to allow for minor version updates.
