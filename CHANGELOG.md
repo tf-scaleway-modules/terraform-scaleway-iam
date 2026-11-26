@@ -2,6 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
+
 ## [4.0.0] - 2026-11-25
 - Require OpenTofu or Terraform 1.11.0 and validate with both
 
@@ -120,4 +121,3 @@ It also configures terraform-docs to inject the documentation into the README.md
 - initialisation
 - first version
 - Initial commit
-
